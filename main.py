@@ -57,6 +57,7 @@ PRESET_KEYS = [
 class Plugin:
     process: asyncio.subprocess.Process | None = None
     process_lock: asyncio.Lock
+    settings_lock: asyncio.Lock
     startup_task: asyncio.Task | None = None
     backend_error: str = ""
     last_auto_car: int = 0
@@ -377,6 +378,7 @@ class Plugin:
     async def _main(self):
         self.loop = asyncio.get_event_loop()
         self.process_lock = asyncio.Lock()
+        self.settings_lock = asyncio.Lock()
         await self._ensure_settings()
         self.startup_task = self.loop.create_task(self._startup_backend())
         decky.logger.info("Forza DualSense Haptics v0.5.0 loaded")
