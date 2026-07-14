@@ -109,3 +109,6 @@ The alpha UI avoids an on-screen keyboard dependency. New presets are named auto
 ## Battery and firmware diagnostics
 
 Battery information appears only when SteamOS exposes a matching `sony_controller_battery_*` power-supply entry. Firmware is displayed as unavailable because the direct hidraw path used by this alpha does not expose a reliable firmware version.
+
+## v0.5.0 alpha notes
+Surface state is inferred from Forza puddle, rumble-strip and surface-rumble values. Per-car automatic loading is opt-in and falls back to global settings. Only fixed curves are supported; custom curves are intentionally not planned.

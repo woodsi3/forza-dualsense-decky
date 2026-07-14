@@ -20,3 +20,9 @@ grep -q 'controller_battery_percent' "$ROOT/forza_haptics/status.py"
 grep -q 'COMMAND_PATH' "$ROOT/main.py"
 
 echo "Verification passed: v0.4 features and safe child control are present."
+
+# v0.5 checks
+grep -q 'traction_intensity' settings.example.json
+grep -q 'surface_state' forza_haptics/telemetry.py
+grep -q 'automatic_car_profiles' main.py
+if grep -Rqi 'custom curve' src forza_haptics; then echo 'Custom curves must remain out of scope'; exit 1; fi
