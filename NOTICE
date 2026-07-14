@@ -1,0 +1,12 @@
+Forza DualSense SteamOS Backend
+
+Portions of this software are derived from:
+
+    forza-dualsense-haptics
+    https://github.com/git-ducu/forza-dualsense-haptics
+
+The upstream project is licensed under the Apache License, Version 2.0.
+
+Modifications include a standalone Linux/SteamOS backend, direct hidraw device
+management, simplified telemetry-to-trigger mappings, JSON status/configuration,
+and systemd user-service packaging.

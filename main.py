@@ -1,0 +1,262 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+import time
+from typing import Any
+
+import decky
+
+
+PLUGIN_DIR = Path(__file__).resolve().parent
+DECKY_HOME = Path(getattr(decky, "DECKY_HOME", "/home/deck/homebrew"))
+SETTINGS_DIR = Path(getattr(decky, "DECKY_SETTINGS_DIR", DECKY_HOME / "settings"))
+RUNTIME_DIR = Path(
+    getattr(decky, "DECKY_RUNTIME_DIR", DECKY_HOME / "data" / "forza-dualsense-haptics")
+)
+LOG_DIR = Path(
+    getattr(decky, "DECKY_LOG_DIR", DECKY_HOME / "logs" / "forza-dualsense-haptics")
+)
+
+SETTINGS_PATH = SETTINGS_DIR / "forza-dualsense-settings.json"
+PRESETS_PATH = SETTINGS_DIR / "forza-dualsense-presets.json"
+STATUS_PATH = RUNTIME_DIR / "forza-dualsense-status.json"
+COMMAND_PATH = RUNTIME_DIR / "forza-dualsense-command.json"
+ENGINE_LOG_PATH = LOG_DIR / "forza-dualsense-engine.log"
+EXAMPLE_SETTINGS = PLUGIN_DIR / "settings.example.json"
+ALLOWED_CONTROLS = {
+    "enabled",
+    "pedal_force_intensity",
+    "abs_intensity",
+    "gear_kick_intensity",
+    "rev_limiter_intensity",
+}
+PRESET_KEYS = [
+    "pedal_force_intensity",
+    "abs_intensity",
+    "gear_kick_intensity",
+    "rev_limiter_intensity",
+]
+
+
+class Plugin:
+    process: asyncio.subprocess.Process | None = None
+    process_lock: asyncio.Lock
+    startup_task: asyncio.Task | None = None
+    backend_error: str = ""
+
+    async def _ensure_settings(self) -> None:
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not SETTINGS_PATH.exists():
+            SETTINGS_PATH.write_text(EXAMPLE_SETTINGS.read_text(encoding="utf-8"), encoding="utf-8")
+        if not PRESETS_PATH.exists():
+            defaults = {
+                "Balanced": {key: 1.0 for key in PRESET_KEYS},
+                "Subtle": {key: 0.65 for key in PRESET_KEYS},
+                "Strong": {key: 1.35 for key in PRESET_KEYS},
+            }
+            self._atomic_write(PRESETS_PATH, defaults)
+
+    @staticmethod
+    def _atomic_write(path: Path, data: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+
+    async def _start_backend(self) -> bool:
+        async with self.process_lock:
+            if self.process is not None and self.process.returncode is None:
+                return True
+            try:
+                await self._ensure_settings()
+                command = [
+                    "/usr/bin/python3",
+                    str(PLUGIN_DIR / "run_backend.py"),
+                    "--config", str(SETTINGS_PATH),
+                    "--status", str(STATUS_PATH),
+                    "--command-file", str(COMMAND_PATH),
+                    "run",
+                ]
+                ENGINE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                log_handle = open(ENGINE_LOG_PATH, "ab", buffering=0)
+                self.process = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=str(PLUGIN_DIR),
+                    stdout=log_handle,
+                    stderr=log_handle,
+                )
+                self.backend_error = ""
+                self.loop.create_task(self._watch_backend(self.process))
+                decky.logger.info("Forza DualSense backend started with PID %s", self.process.pid)
+                return True
+            except Exception as exc:
+                self.process = None
+                self.backend_error = f"{type(exc).__name__}: {exc}"
+                decky.logger.exception("Could not start Forza DualSense backend")
+                return False
+
+    async def _startup_backend(self) -> None:
+        await asyncio.sleep(0)
+        await self._start_backend()
+
+    async def _watch_backend(self, process: asyncio.subprocess.Process) -> None:
+        return_code = await process.wait()
+        if self.process is process:
+            self.process = None
+        if return_code != 0:
+            self.backend_error = f"Engine exited with code {return_code}. Check {ENGINE_LOG_PATH}"
+            decky.logger.error(self.backend_error)
+
+    async def _stop_backend(self) -> None:
+        async with self.process_lock:
+            process = self.process
+            self.process = None
+            if process is None or process.returncode is not None:
+                return
+            decky.logger.info("Stopping exact backend child PID %s", process.pid)
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                return
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
+
+    async def restart_backend(self) -> bool:
+        await self._stop_backend()
+        return await self._start_backend()
+
+    async def get_status(self) -> dict[str, Any]:
+        running = self.process is not None and self.process.returncode is None
+        default: dict[str, Any] = {
+            "running": running,
+            "enabled": True,
+            "telemetry": "waiting",
+            "controller": "disconnected",
+            "controller_name": "",
+            "controller_transport": "",
+            "controller_path": "",
+            "controller_serial": "",
+            "controller_product_id": "",
+            "controller_firmware": "Unavailable through hidraw",
+            "controller_battery_percent": None,
+            "controller_battery_status": "Unavailable",
+            "brake_effect": "clear",
+            "throttle_effect": "clear",
+            "active_test": "",
+            "settings_revision": 0,
+            "speed_kmh": 0.0,
+            "rpm": 0.0,
+            "rpm_ratio": 0.0,
+            "gear": 0,
+            "backend_error": self.backend_error,
+        }
+        try:
+            if STATUS_PATH.exists():
+                default.update(json.loads(STATUS_PATH.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError) as exc:
+            decky.logger.warning("Could not read status: %s", exc)
+        default["running"] = running
+        default["backend_error"] = self.backend_error
+        return default
+
+    async def get_settings(self) -> dict[str, Any]:
+        await self._ensure_settings()
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+
+    async def update_setting(self, key: str, value: Any) -> dict[str, Any]:
+        if key not in ALLOWED_CONTROLS:
+            raise ValueError(f"Unsupported setting: {key}")
+        settings = await self.get_settings()
+        if key == "enabled":
+            settings[key] = bool(value)
+        else:
+            numeric = float(value)
+            if not 0.0 <= numeric <= 2.0:
+                raise ValueError(f"{key} must be between 0.0 and 2.0")
+            settings[key] = numeric
+        self._atomic_write(SETTINGS_PATH, settings)
+        return settings
+
+    async def list_presets(self) -> list[str]:
+        await self._ensure_settings()
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        return sorted(presets.keys(), key=str.lower)
+
+    async def create_preset(self) -> str:
+        settings = await self.get_settings()
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        index = 1
+        while f"Preset {index}" in presets:
+            index += 1
+        name = f"Preset {index}"
+        presets[name] = {key: settings[key] for key in PRESET_KEYS}
+        self._atomic_write(PRESETS_PATH, presets)
+        return name
+
+    async def load_preset(self, name: str) -> dict[str, Any]:
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        if name not in presets:
+            raise ValueError(f"Preset not found: {name}")
+        settings = await self.get_settings()
+        settings.update(presets[name])
+        self._atomic_write(SETTINGS_PATH, settings)
+        return settings
+
+    async def duplicate_preset(self, name: str) -> str:
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        if name not in presets:
+            raise ValueError(f"Preset not found: {name}")
+        base = f"{name} Copy"
+        candidate = base
+        index = 2
+        while candidate in presets:
+            candidate = f"{base} {index}"
+            index += 1
+        presets[candidate] = dict(presets[name])
+        self._atomic_write(PRESETS_PATH, presets)
+        return candidate
+
+    async def delete_preset(self, name: str) -> bool:
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        if name not in presets:
+            return False
+        del presets[name]
+        self._atomic_write(PRESETS_PATH, presets)
+        return True
+
+    async def test_effect(self, effect: str) -> bool:
+        if effect not in {"pedal", "abs", "gear", "rev"}:
+            raise ValueError(f"Unsupported test effect: {effect}")
+        self._atomic_write(
+            COMMAND_PATH,
+            {"id": str(time.time_ns()), "type": "test_effect", "effect": effect},
+        )
+        return True
+
+    async def _main(self):
+        self.loop = asyncio.get_event_loop()
+        self.process_lock = asyncio.Lock()
+        await self._ensure_settings()
+        self.startup_task = self.loop.create_task(self._startup_backend())
+        decky.logger.info("Forza DualSense Haptics v0.4.0 loaded")
+
+    async def _unload(self):
+        if self.startup_task is not None and not self.startup_task.done():
+            self.startup_task.cancel()
+            try:
+                await self.startup_task
+            except asyncio.CancelledError:
+                pass
+        await self._stop_backend()
+
+    async def _uninstall(self):
+        await self._stop_backend()
