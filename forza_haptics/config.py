@@ -26,7 +26,7 @@ class Settings:
     pedal_response_curve: str = "progressive"
     traction_response_curve: str = "progressive"
 
-    traction_enabled: bool = True
+    traction_enabled: bool = False
     traction_min_throttle: int = 40
     traction_min_speed_kmh: float = 8.0
     traction_mild_slip: float = 0.22

@@ -65,15 +65,66 @@ class Plugin:
     async def _ensure_settings(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not SETTINGS_PATH.exists():
-            SETTINGS_PATH.write_text(EXAMPLE_SETTINGS.read_text(encoding="utf-8"), encoding="utf-8")
-        if not PRESETS_PATH.exists():
-            defaults = {
-                "Balanced": {key: 1.0 for key in PRESET_KEYS},
-                "Subtle": {key: 0.65 for key in PRESET_KEYS},
-                "Strong": {key: 1.35 for key in PRESET_KEYS},
+
+        defaults = json.loads(EXAMPLE_SETTINGS.read_text(encoding="utf-8"))
+
+        # Migrate existing settings by adding newly introduced keys while
+        # preserving every existing user value.
+        if SETTINGS_PATH.exists():
+            existing = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            migrated = {**defaults, **existing}
+            if migrated != existing:
+                self._atomic_write(SETTINGS_PATH, migrated)
+                decky.logger.info("Migrated settings schema with new defaults")
+        else:
+            self._atomic_write(SETTINGS_PATH, defaults)
+
+        preset_defaults = {
+            key: defaults[key]
+            for key in PRESET_KEYS
+        }
+
+        if PRESETS_PATH.exists():
+            presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+            migrated_presets = {}
+
+            for name, preset in presets.items():
+                migrated_preset = dict(preset_defaults)
+                if isinstance(preset, dict):
+                    migrated_preset.update(
+                        {
+                            key: value
+                            for key, value in preset.items()
+                            if key in PRESET_KEYS
+                        }
+                    )
+                migrated_presets[name] = migrated_preset
+
+            if migrated_presets != presets:
+                self._atomic_write(PRESETS_PATH, migrated_presets)
+                decky.logger.info("Migrated presets schema with new defaults")
+        else:
+            intensity_keys = {
+                "pedal_force_intensity",
+                "abs_intensity",
+                "gear_kick_intensity",
+                "rev_limiter_intensity",
+                "traction_intensity",
             }
-            self._atomic_write(PRESETS_PATH, defaults)
+
+            presets = {}
+            for name, scale in (
+                ("Balanced", 1.0),
+                ("Subtle", 0.65),
+                ("Strong", 1.35),
+            ):
+                preset = dict(preset_defaults)
+                for key in intensity_keys:
+                    preset[key] = scale
+                presets[name] = preset
+
+            self._atomic_write(PRESETS_PATH, presets)
+
         if not CAR_PROFILES_PATH.exists():
             self._atomic_write(CAR_PROFILES_PATH, {})
 
@@ -328,7 +379,7 @@ class Plugin:
         self.process_lock = asyncio.Lock()
         await self._ensure_settings()
         self.startup_task = self.loop.create_task(self._startup_backend())
-        decky.logger.info("Forza DualSense Haptics v0.4.0 loaded")
+        decky.logger.info("Forza DualSense Haptics v0.5.0 loaded")
 
     async def _unload(self):
         if self.startup_task is not None and not self.startup_task.done():

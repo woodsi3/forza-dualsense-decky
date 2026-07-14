@@ -32,7 +32,7 @@
   "traction_intensity": 1.0,
   "pedal_response_curve": "progressive",
   "traction_response_curve": "progressive",
-  "traction_enabled": true,
+  "traction_enabled": false,
   "traction_min_throttle": 40,
   "traction_min_speed_kmh": 8.0,
   "traction_mild_slip": 0.22,
