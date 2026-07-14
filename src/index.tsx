@@ -1,4 +1,5 @@
 import {
+  ButtonItem,
   PanelSection,
   PanelSectionRow,
   SliderField,
@@ -226,7 +227,8 @@ function Content() {
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <button
+          <ButtonItem
+            layout="below"
             disabled={busy}
             onClick={async () => {
               setBusy(true);
@@ -237,10 +239,9 @@ function Content() {
                 setBusy(false);
               }
             }}
-            style={{ width: "100%", padding: 10 }}
           >
             Restart engine
-          </button>
+          </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
     </>

@@ -1,117 +1,59 @@
-# Forza DualSense Haptics — Decky MVP v0.2.0
+# Forza DualSense Haptics for Decky
 
-This is the first Decky Loader integration of the validated SteamOS backend.
+SteamOS Decky plugin that maps Forza Horizon 6 telemetry to DualSense adaptive triggers.
 
-## Included sidebar features
+## Safety rules
 
-- Backend running status
-- Forza telemetry receiving/waiting status
-- DualSense connected/disconnected status
-- USB/Bluetooth transport display
-- Current L2 and R2 effect names
-- Speed, gear and RPM display
-- Enable/disable toggle
-- Pedal resistance intensity
-- ABS intensity
-- Gear-kick intensity
-- Rev-limiter intensity
-- Manual engine restart
+- Never restart `plugin_loader` while Game Mode/Gamescope is active.
+- Frontend changes are built and deployed in Desktop Mode, followed by a reboot.
+- The plugin only terminates its exact child backend process; it never signals a process group.
+- Every deployment creates a timestamped rollback backup.
 
-The Decky Python plugin starts and owns the bundled telemetry backend. Do not
-run the old standalone systemd service simultaneously, because both processes
-would try to bind UDP port 5300 and open the controller.
-
-Disable the standalone service first:
+## Repository setup
 
 ```bash
-systemctl --user disable --now forza-dualsense-backend.service
+chmod +x scripts/*.sh
+./scripts/init-git.sh
 ```
 
-## Build on the SteamOS machine or another Linux PC
-
-This archive contains source code. The frontend must be compiled because Decky
-loads `dist/index.js`.
+## Build
 
 ```bash
-cd forza_dualsense_decky
-corepack enable
-pnpm install
-pnpm build
+./scripts/build.sh
 ```
 
-After building, confirm this exists:
+## Deploy safely
+
+Switch to Desktop Mode first, then:
 
 ```bash
-ls -l dist/index.js
+./scripts/deploy.sh
+sudo reboot
 ```
 
-## Install locally
+The deploy script refuses to run while Gamescope is active.
+
+## Roll back
+
+From Desktop Mode:
 
 ```bash
-chmod +x install-plugin.sh
-./install-plugin.sh
+./scripts/rollback.sh
+sudo reboot
 ```
 
-The plugin is copied to:
+## Verify without building
+
+```bash
+./scripts/verify.sh
+```
+
+## Runtime configuration
+
+Decky settings are stored separately from the repository under:
 
 ```text
-~/homebrew/plugins/forza-dualsense-haptics
+/home/deck/homebrew/settings/forza-dualsense-settings.json
 ```
 
-Restart Decky Loader or reboot SteamOS. The plugin should then appear as
-**Forza DualSense Haptics** in the Quick Access menu.
-
-## Settings and runtime data
-
-Decky stores plugin settings and runtime data in its managed directories.
-The backend process is started during plugin load and stopped during unload,
-which clears both adaptive triggers.
-
-## Important first test
-
-1. Disable the old systemd backend.
-2. Install and load the Decky plugin.
-3. Open the sidebar before launching Forza.
-4. Confirm Engine = Running and DualSense = Connected.
-5. Launch Forza with Data Out on port 5300.
-6. Confirm Telemetry changes to Receiving.
-7. Drive and verify all four effects.
-8. Move each slider and confirm the backend restarts and the new intensity is felt.
-
-## Known limitation
-
-Each slider save currently restarts the backend. That is safe and simple for
-the MVP, but the next revision should support hot settings updates without
-restarting or briefly dropping telemetry.
-
-
-## v0.2.1 startup fix
-
-v0.2.0 could leave the frontend on `Loading…` because Decky waits for the
-plugin `_main()` coroutine to return before serving frontend RPC calls, while
-the plugin was waiting for the child engine process to start.
-
-v0.2.1 schedules engine startup after RPC initialization and records launch
-errors in the Decky log.
-
-For an existing v0.2.0 installation, the Python-only hotfix does not require
-rebuilding the frontend:
-
-```bash
-chmod +x apply-backend-hotfix.sh
-./apply-backend-hotfix.sh
-```
-
-Diagnostics:
-
-```bash
-sudo journalctl -u plugin_loader -n 200 --no-pager
-sudo tail -n 100 /home/deck/homebrew/logs/forza-dualsense-engine.log
-```
-
-Depending on the Decky installation, the engine log may instead be under a
-Decky-managed log directory. Locate it with:
-
-```bash
-sudo find /home/deck/homebrew /tmp -name 'forza-dualsense-engine.log' 2>/dev/null
-```
+For local Forza Data Out, use `127.0.0.1` and UDP port `5300`.

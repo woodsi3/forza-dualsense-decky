@@ -4,8 +4,6 @@ import asyncio
 import json
 import os
 from pathlib import Path
-import signal
-import sys
 from typing import Any
 
 import decky
@@ -67,7 +65,7 @@ class Plugin:
             try:
                 await self._ensure_settings()
                 command = [
-                    sys.executable,
+                    "/usr/bin/python3",
                     str(PLUGIN_DIR / "run_backend.py"),
                     "--config",
                     str(SETTINGS_PATH),
@@ -84,13 +82,13 @@ class Plugin:
                     cwd=str(PLUGIN_DIR),
                     stdout=log_handle,
                     stderr=log_handle,
-                    start_new_session=True,
                 )
                 self.backend_error = ""
                 decky.logger.info(
                     "Forza DualSense backend started with PID %s",
                     self.process.pid,
                 )
+                self.loop.create_task(self._watch_backend(self.process))
                 return True
             except Exception as exc:
                 self.process = None
@@ -104,6 +102,22 @@ class Plugin:
         await asyncio.sleep(0)
         await self._start_backend()
 
+    async def _watch_backend(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        return_code = await process.wait()
+        if self.process is process:
+            self.process = None
+        if return_code != 0:
+            self.backend_error = (
+                f"Engine exited with code {return_code}. "
+                f"Check {ENGINE_LOG_PATH}"
+            )
+            decky.logger.error(self.backend_error)
+        else:
+            decky.logger.info("Forza DualSense backend exited cleanly")
+
     async def _stop_backend(self) -> None:
         async with self.process_lock:
             process = self.process
@@ -111,9 +125,15 @@ class Plugin:
             if process is None or process.returncode is not None:
                 return
 
-            decky.logger.info("Stopping Forza DualSense backend")
+            decky.logger.info(
+                "Stopping Forza DualSense backend PID %s",
+                process.pid,
+            )
+
+            # Only signal the exact child process. Never signal a process group:
+            # on some SteamOS/Decky builds that can include the game-mode session.
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                process.terminate()
             except ProcessLookupError:
                 return
 
@@ -121,7 +141,7 @@ class Plugin:
                 await asyncio.wait_for(process.wait(), timeout=3.0)
             except asyncio.TimeoutError:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    process.kill()
                 except ProcessLookupError:
                     pass
                 await process.wait()
