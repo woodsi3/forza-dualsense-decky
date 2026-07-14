@@ -12,8 +12,28 @@ import decky
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
-SETTINGS_PATH = Path(decky.DECKY_SETTINGS_DIR) / "forza-dualsense-settings.json"
-STATUS_PATH = Path(decky.DECKY_RUNTIME_DIR) / "forza-dualsense-status.json"
+
+# Compatibility across Decky Loader releases.
+DECKY_HOME = Path(getattr(decky, "DECKY_HOME", "/home/deck/homebrew"))
+SETTINGS_DIR = Path(getattr(decky, "DECKY_SETTINGS_DIR", DECKY_HOME / "settings"))
+RUNTIME_DIR = Path(
+    getattr(
+        decky,
+        "DECKY_RUNTIME_DIR",
+        DECKY_HOME / "data" / "forza-dualsense-haptics",
+    )
+)
+LOG_DIR = Path(
+    getattr(
+        decky,
+        "DECKY_LOG_DIR",
+        DECKY_HOME / "logs" / "forza-dualsense-haptics",
+    )
+)
+
+SETTINGS_PATH = SETTINGS_DIR / "forza-dualsense-settings.json"
+STATUS_PATH = RUNTIME_DIR / "forza-dualsense-status.json"
+ENGINE_LOG_PATH = LOG_DIR / "forza-dualsense-engine.log"
 EXAMPLE_SETTINGS = PLUGIN_DIR / "settings.example.json"
 ALLOWED_CONTROLS = {
     "enabled",
@@ -55,9 +75,8 @@ class Plugin:
                     str(STATUS_PATH),
                     "run",
                 ]
-                log_path = Path(decky.DECKY_LOG_DIR) / "forza-dualsense-engine.log"
-                log_path.parent.mkdir(parents=True, exist_ok=True)
-                log_handle = open(log_path, "ab", buffering=0)
+                ENGINE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                log_handle = open(ENGINE_LOG_PATH, "ab", buffering=0)
 
                 decky.logger.info("Starting Forza DualSense backend: %s", command)
                 self.process = await asyncio.create_subprocess_exec(
