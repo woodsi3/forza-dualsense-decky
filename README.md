@@ -1,194 +1,85 @@
-# Forza DualSense SteamOS Backend — Phase 2 MVP v0.1.1
+# Forza DualSense Haptics — Decky MVP v0.2.0
 
-This is a standalone, headless SteamOS/Linux backend for testing live Forza
-Horizon 6 telemetry against a PS5 DualSense controller.
+This is the first Decky Loader integration of the validated SteamOS backend.
 
-It currently implements:
+## Included sidebar features
 
-- brake-pedal resistance on L2;
-- throttle-pedal resistance on R2;
-- ABS vibration on L2;
-- gear-change kick on R2;
-- rev-limiter vibration on R2;
-- USB and Bluetooth DualSense detection/reconnection;
-- safe trigger clearing when telemetry stops or the process exits;
-- JSON settings;
-- JSON status output for the later Decky sidebar;
-- an optional systemd user service.
+- Backend running status
+- Forza telemetry receiving/waiting status
+- DualSense connected/disconnected status
+- USB/Bluetooth transport display
+- Current L2 and R2 effect names
+- Speed, gear and RPM display
+- Enable/disable toggle
+- Pedal resistance intensity
+- ABS intensity
+- Gear-kick intensity
+- Rev-limiter intensity
+- Manual engine restart
 
-It deliberately excludes the Windows GUI and haptic-audio mixer for this phase.
+The Decky Python plugin starts and owns the bundled telemetry backend. Do not
+run the old standalone systemd service simultaneously, because both processes
+would try to bind UDP port 5300 and open the controller.
 
-## 1. Extract and install
-
-```bash
-cd ~/Downloads/forza_dualsense_backend
-chmod +x install.sh uninstall.sh run_backend.py
-./install.sh
-```
-
-The backend is installed under:
-
-```text
-~/.local/share/forza-dualsense/backend
-```
-
-Settings are stored at:
-
-```text
-~/.local/share/forza-dualsense/settings.json
-```
-
-Runtime status is written to:
-
-```text
-~/.local/share/forza-dualsense/status.json
-```
-
-## 2. HID permissions
-
-You already installed a compatible rule during Phase 1. If needed:
-
-```bash
-sudo cp packaging/70-dualsense-hidraw.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-Reconnect or power-cycle the controller afterward.
-
-## 3. Confirm controller output
-
-```bash
-python3 ~/.local/share/forza-dualsense/backend/run_backend.py controller-test
-```
-
-## 4. Configure Forza Data Out
-
-In Forza:
-
-- Data Out: **On**
-- IP address: the SteamOS machine's LAN IP initially
-- Port: **5300**
-
-The backend binds `0.0.0.0:5300`, which accepts local and LAN telemetry.
-
-## 5. Run manually first
-
-```bash
-python3 ~/.local/share/forza-dualsense/backend/run_backend.py run
-```
-
-Leave the terminal open, start driving, and test:
-
-- progressive L2 brake resistance;
-- progressive R2 throttle resistance;
-- L2 vibration during hard braking and wheel slip;
-- R2 kick when the gear changes;
-- R2 vibration near the rev limiter.
-
-Stop with `Ctrl+C`. Both triggers should return to neutral.
-
-## 6. View live status
-
-From another terminal:
-
-```bash
-python3 ~/.local/share/forza-dualsense/backend/run_backend.py status
-```
-
-Or continuously:
-
-```bash
-watch -n 1 cat ~/.local/share/forza-dualsense/status.json
-```
-
-The future Decky UI will consume the same status fields.
-
-## 7. Tune intensity
-
-Edit:
-
-```bash
-nano ~/.local/share/forza-dualsense/settings.json
-```
-
-The four primary controls are:
-
-```json
-{
-  "pedal_force_intensity": 1.0,
-  "abs_intensity": 1.0,
-  "gear_kick_intensity": 1.0,
-  "rev_limiter_intensity": 1.0
-}
-```
-
-Valid range is `0.0` to `2.0`.
-
-Restart the backend after editing.
-
-## 8. Run automatically
-
-Only enable this after manual testing succeeds:
-
-```bash
-systemctl --user enable --now forza-dualsense-backend.service
-```
-
-Check it with:
-
-```bash
-systemctl --user status forza-dualsense-backend.service
-journalctl --user -u forza-dualsense-backend.service -f
-```
-
-Stop it with:
+Disable the standalone service first:
 
 ```bash
 systemctl --user disable --now forza-dualsense-backend.service
 ```
 
-## Current limitations
+## Build on the SteamOS machine or another Linux PC
 
-- This MVP implements the four requested effects with a clean, simplified
-  mapping rather than importing every upstream tuning algorithm.
-- ABS is inferred from brake pressure, speed and front-wheel slip.
-- Haptic audio is not included yet.
-- Settings reload requires a restart.
-- Only one controller is actively controlled.
-- The backend does not yet expose Decky RPC methods; the JSON status/config
-  boundary is intentionally designed for that next step.
-
-## Attribution and licence
-
-The Forza packet layout, DualSense USB/Bluetooth report layout and adaptive
-trigger encoding are derived from `git-ducu/forza-dualsense-haptics`, released
-under Apache License 2.0.
-
-This package is a modified SteamOS-oriented backend prototype and is not an
-official upstream release.
-
-
-## v0.1.1 rev-limiter fix
-
-Forza can report a `max_rpm` value above the car's actual in-game limiter.
-The original `0.94` threshold could therefore never be reached.
-
-This release engages at `0.88`, releases at `0.84`, and latches the effect to
-prevent rapid on/off switching.
-
-For an existing settings file:
+This archive contains source code. The frontend must be compiled because Decky
+loads `dist/index.js`.
 
 ```bash
-python3 upgrade_rev_limiter.py
+cd forza_dualsense_decky
+corepack enable
+pnpm install
+pnpm build
 ```
 
-Then reinstall and restart the backend. Watch the live values with:
+After building, confirm this exists:
 
 ```bash
-watch -n 0.2 cat ~/.local/share/forza-dualsense/status.json
+ls -l dist/index.js
 ```
 
-At the limiter, `throttle_effect` should show `"rev limiter"`. If a specific
-car still does not reach the threshold, try `0.84` engagement and `0.80`
-release in `settings.json`.
+## Install locally
+
+```bash
+chmod +x install-plugin.sh
+./install-plugin.sh
+```
+
+The plugin is copied to:
+
+```text
+~/homebrew/plugins/forza-dualsense-haptics
+```
+
+Restart Decky Loader or reboot SteamOS. The plugin should then appear as
+**Forza DualSense Haptics** in the Quick Access menu.
+
+## Settings and runtime data
+
+Decky stores plugin settings and runtime data in its managed directories.
+The backend process is started during plugin load and stopped during unload,
+which clears both adaptive triggers.
+
+## Important first test
+
+1. Disable the old systemd backend.
+2. Install and load the Decky plugin.
+3. Open the sidebar before launching Forza.
+4. Confirm Engine = Running and DualSense = Connected.
+5. Launch Forza with Data Out on port 5300.
+6. Confirm Telemetry changes to Receiving.
+7. Drive and verify all four effects.
+8. Move each slider and confirm the backend restarts and the new intensity is felt.
+
+## Known limitation
+
+Each slider save currently restarts the backend. That is safe and simple for
+the MVP, but the next revision should support hot settings updates without
+restarting or briefly dropping telemetry.
