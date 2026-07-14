@@ -22,6 +22,7 @@ type RuntimeStatus = {
   rpm: number;
   rpm_ratio: number;
   gear: number;
+  backend_error?: string;
 };
 
 type Settings = {
@@ -52,6 +53,7 @@ const emptyStatus: RuntimeStatus = {
   rpm: 0,
   rpm_ratio: 0,
   gear: 0,
+  backend_error: "",
 };
 
 function StatusRow({ label, ok, value }: { label: string; ok: boolean; value: string }) {
@@ -72,6 +74,7 @@ function Content() {
   const [status, setStatus] = useState<RuntimeStatus>(emptyStatus);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -82,7 +85,12 @@ function Content() {
   }, []);
 
   useEffect(() => {
-    getSettings().then(setSettings).catch(console.error);
+    getSettings()
+      .then(setSettings)
+      .catch((error) => {
+        console.error(error);
+        setLoadError(String(error));
+      });
     refresh();
     const timer = window.setInterval(refresh, 750);
     return () => window.clearInterval(timer);
@@ -100,7 +108,15 @@ function Content() {
   };
 
   if (!settings) {
-    return <PanelSection title="Forza DualSense">Loading…</PanelSection>;
+    return (
+      <PanelSection title="Forza DualSense">
+        <PanelSectionRow>
+          <div>
+            {loadError ? `Backend RPC error: ${loadError}` : "Loading backend…"}
+          </div>
+        </PanelSectionRow>
+      </PanelSection>
+    );
   }
 
   return (
@@ -121,6 +137,13 @@ function Content() {
               : "Disconnected"
           }
         />
+        {status.backend_error && (
+          <PanelSectionRow>
+            <div style={{ fontSize: 12 }}>
+              Engine error: {status.backend_error}
+            </div>
+          </PanelSectionRow>
+        )}
         <PanelSectionRow>
           <div style={{ fontSize: 13, opacity: 0.85 }}>
             L2: {status.brake_effect}<br />

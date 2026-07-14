@@ -83,3 +83,35 @@ which clears both adaptive triggers.
 Each slider save currently restarts the backend. That is safe and simple for
 the MVP, but the next revision should support hot settings updates without
 restarting or briefly dropping telemetry.
+
+
+## v0.2.1 startup fix
+
+v0.2.0 could leave the frontend on `Loading…` because Decky waits for the
+plugin `_main()` coroutine to return before serving frontend RPC calls, while
+the plugin was waiting for the child engine process to start.
+
+v0.2.1 schedules engine startup after RPC initialization and records launch
+errors in the Decky log.
+
+For an existing v0.2.0 installation, the Python-only hotfix does not require
+rebuilding the frontend:
+
+```bash
+chmod +x apply-backend-hotfix.sh
+./apply-backend-hotfix.sh
+```
+
+Diagnostics:
+
+```bash
+sudo journalctl -u plugin_loader -n 200 --no-pager
+sudo tail -n 100 /home/deck/homebrew/logs/forza-dualsense-engine.log
+```
+
+Depending on the Decky installation, the engine log may instead be under a
+Decky-managed log directory. Locate it with:
+
+```bash
+sudo find /home/deck/homebrew /tmp -name 'forza-dualsense-engine.log' 2>/dev/null
+```

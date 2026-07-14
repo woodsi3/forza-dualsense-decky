@@ -27,6 +27,8 @@ ALLOWED_CONTROLS = {
 class Plugin:
     process: asyncio.subprocess.Process | None = None
     process_lock: asyncio.Lock
+    startup_task: asyncio.Task | None = None
+    backend_error: str = ""
 
     async def _ensure_settings(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -42,35 +44,46 @@ class Plugin:
             if self.process is not None and self.process.returncode is None:
                 return True
 
-            await self._ensure_settings()
-            command = [
-                sys.executable,
-                str(PLUGIN_DIR / "run_backend.py"),
-                "--config",
-                str(SETTINGS_PATH),
-                "--status",
-                str(STATUS_PATH),
-                "run",
-            ]
-            decky.logger.info("Starting Forza DualSense backend")
-            self.process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=str(PLUGIN_DIR),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
-            )
-            self.loop.create_task(self._log_backend_output(self.process))
-            return True
+            try:
+                await self._ensure_settings()
+                command = [
+                    sys.executable,
+                    str(PLUGIN_DIR / "run_backend.py"),
+                    "--config",
+                    str(SETTINGS_PATH),
+                    "--status",
+                    str(STATUS_PATH),
+                    "run",
+                ]
+                log_path = Path(decky.DECKY_LOG_DIR) / "forza-dualsense-engine.log"
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_handle = open(log_path, "ab", buffering=0)
 
-    async def _log_backend_output(self, process: asyncio.subprocess.Process) -> None:
-        if process.stdout is None:
-            return
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            decky.logger.info("[engine] %s", line.decode(errors="replace").rstrip())
+                decky.logger.info("Starting Forza DualSense backend: %s", command)
+                self.process = await asyncio.create_subprocess_exec(
+                    *command,
+                    cwd=str(PLUGIN_DIR),
+                    stdout=log_handle,
+                    stderr=log_handle,
+                    start_new_session=True,
+                )
+                self.backend_error = ""
+                decky.logger.info(
+                    "Forza DualSense backend started with PID %s",
+                    self.process.pid,
+                )
+                return True
+            except Exception as exc:
+                self.process = None
+                self.backend_error = f"{type(exc).__name__}: {exc}"
+                decky.logger.exception("Could not start Forza DualSense backend")
+                return False
+
+    async def _startup_backend(self) -> None:
+        # Runs after _main has returned, allowing Decky RPC calls to become
+        # available even if process startup fails or takes longer than expected.
+        await asyncio.sleep(0)
+        await self._start_backend()
 
     async def _stop_backend(self) -> None:
         async with self.process_lock:
@@ -113,6 +126,7 @@ class Plugin:
             "rpm": 0.0,
             "rpm_ratio": 0.0,
             "gear": 0,
+            "backend_error": self.backend_error,
         }
         try:
             if STATUS_PATH.exists():
@@ -121,6 +135,7 @@ class Plugin:
         except (OSError, json.JSONDecodeError) as exc:
             decky.logger.warning("Could not read status: %s", exc)
         default["running"] = running
+        default["backend_error"] = self.backend_error
         return default
 
     async def get_settings(self) -> dict[str, Any]:
@@ -150,10 +165,18 @@ class Plugin:
         self.loop = asyncio.get_event_loop()
         self.process_lock = asyncio.Lock()
         await self._ensure_settings()
-        await self._start_backend()
-        decky.logger.info("Forza DualSense Haptics loaded")
+        self.startup_task = self.loop.create_task(self._startup_backend())
+        decky.logger.info(
+            "Forza DualSense Haptics RPC backend loaded; engine startup scheduled"
+        )
 
     async def _unload(self):
+        if self.startup_task is not None and not self.startup_task.done():
+            self.startup_task.cancel()
+            try:
+                await self.startup_task
+            except asyncio.CancelledError:
+                pass
         await self._stop_backend()
         decky.logger.info("Forza DualSense Haptics unloaded")
 
