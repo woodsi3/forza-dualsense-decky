@@ -14,6 +14,7 @@ class EffectStatus:
     throttle_mode: str = "clear"
     last_gear: int = 0
     gear_kick_until: float = 0.0
+    rev_limiter_active: bool = False
 
 
 class EffectEngine:
@@ -92,6 +93,19 @@ class EffectEngine:
                 now + self.settings.gear_kick_duration_ms / 1000.0
             )
 
+        # Latch near redline and release lower to avoid rapid chatter.
+        if self.status.rev_limiter_active:
+            if (
+                state.rpm_ratio < self.settings.rev_limiter_release_ratio
+                or state.throttle <= self.settings.rev_limiter_min_throttle
+            ):
+                self.status.rev_limiter_active = False
+        elif (
+            state.rpm_ratio >= self.settings.rev_limiter_ratio
+            and state.throttle > self.settings.rev_limiter_min_throttle
+        ):
+            self.status.rev_limiter_active = True
+
         if now < self.status.gear_kick_until:
             throttle_effect = vibration(
                 position=20,
@@ -102,9 +116,9 @@ class EffectEngine:
                 frequency=self.settings.gear_kick_frequency,
             )
             self.status.throttle_mode = "gear kick"
-        elif state.rpm_ratio >= self.settings.rev_limiter_ratio and state.throttle > 20:
+        elif self.status.rev_limiter_active:
             throttle_effect = vibration(
-                position=35,
+                position=25,
                 amplitude=self._scale(
                     self.settings.rev_limiter_amplitude,
                     self.settings.rev_limiter_intensity,

@@ -1,4 +1,4 @@
-# Forza DualSense SteamOS Backend — Phase 2 MVP
+# Forza DualSense SteamOS Backend — Phase 2 MVP v0.1.1
 
 This is a standalone, headless SteamOS/Linux backend for testing live Forza
 Horizon 6 telemetry against a PS5 DualSense controller.
@@ -167,3 +167,28 @@ under Apache License 2.0.
 
 This package is a modified SteamOS-oriented backend prototype and is not an
 official upstream release.
+
+
+## v0.1.1 rev-limiter fix
+
+Forza can report a `max_rpm` value above the car's actual in-game limiter.
+The original `0.94` threshold could therefore never be reached.
+
+This release engages at `0.88`, releases at `0.84`, and latches the effect to
+prevent rapid on/off switching.
+
+For an existing settings file:
+
+```bash
+python3 upgrade_rev_limiter.py
+```
+
+Then reinstall and restart the backend. Watch the live values with:
+
+```bash
+watch -n 0.2 cat ~/.local/share/forza-dualsense/status.json
+```
+
+At the limiter, `throttle_effect` should show `"rev limiter"`. If a specific
+car still does not reach the threshold, try `0.84` engagement and `0.80`
+release in `settings.json`.

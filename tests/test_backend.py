@@ -44,5 +44,19 @@ class BackendTests(unittest.TestCase):
         self.assertIn(engine.status.brake_mode, ("ABS vibration", "pedal resistance"))
 
 
+    def test_rev_limiter_latches(self):
+        settings = Settings()
+        raw = bytearray(self.make_packet())
+        struct.pack_into("<f", raw, 8, 8000.0)
+        struct.pack_into("<f", raw, 16, 7200.0)
+        raw[315] = 255
+        state = decode_packet(bytes(raw))
+        engine = EffectEngine(settings)
+        engine.compute(state)
+        self.assertEqual(engine.status.throttle_mode, "rev limiter")
+        self.assertTrue(engine.status.rev_limiter_active)
+
+
+
 if __name__ == "__main__":
     unittest.main()

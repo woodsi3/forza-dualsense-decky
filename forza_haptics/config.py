@@ -37,8 +37,11 @@ class Settings:
     gear_kick_frequency: int = 14
     gear_kick_duration_ms: float = 90.0
 
-    rev_limiter_ratio: float = 0.94
-    rev_limiter_amplitude: int = 52
+    # Forza can report max_rpm above the actual in-game limiter.
+    rev_limiter_ratio: float = 0.88
+    rev_limiter_release_ratio: float = 0.84
+    rev_limiter_min_throttle: int = 20
+    rev_limiter_amplitude: int = 60
     rev_limiter_frequency: int = 32
 
     controller_serial: str = ""
@@ -80,3 +83,7 @@ class Settings:
                 raise ValueError(f"{name} must be between 0.0 and 2.0")
         if not 0.5 <= self.rev_limiter_ratio <= 1.2:
             raise ValueError("rev_limiter_ratio must be between 0.5 and 1.2")
+        if not 0.5 <= self.rev_limiter_release_ratio <= self.rev_limiter_ratio:
+            raise ValueError(
+                "rev_limiter_release_ratio must be between 0.5 and rev_limiter_ratio"
+            )

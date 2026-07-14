@@ -22,9 +22,11 @@
   "gear_kick_amplitude": 90,
   "gear_kick_frequency": 14,
   "gear_kick_duration_ms": 90.0,
-  "rev_limiter_ratio": 0.94,
-  "rev_limiter_amplitude": 52,
+  "rev_limiter_ratio": 0.88,
+  "rev_limiter_amplitude": 60,
   "rev_limiter_frequency": 32,
   "controller_serial": "",
-  "debug": false
+  "debug": false,
+  "rev_limiter_release_ratio": 0.84,
+  "rev_limiter_min_throttle": 20
 }
