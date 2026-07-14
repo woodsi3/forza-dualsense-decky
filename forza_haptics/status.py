@@ -19,9 +19,16 @@ class RuntimeStatus:
     controller_name: str = ""
     controller_transport: str = ""
     controller_path: str = ""
+    controller_serial: str = ""
+    controller_product_id: str = ""
+    controller_firmware: str = "Unavailable through hidraw"
+    controller_battery_percent: int | None = None
+    controller_battery_status: str = "Unavailable"
     controller_error: str = ""
     brake_effect: str = "clear"
     throttle_effect: str = "clear"
+    active_test: str = ""
+    settings_revision: int = 0
     speed_kmh: float = 0.0
     rpm: float = 0.0
     rpm_ratio: float = 0.0

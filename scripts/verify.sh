@@ -8,7 +8,15 @@ python3 -m compileall -q "$ROOT/forza_haptics"
 grep -q 'process\.terminate()' "$ROOT/main.py"
 grep -q 'process\.kill()' "$ROOT/main.py"
 ! grep -qE 'killpg|start_new_session' "$ROOT/main.py"
+
 grep -q 'ButtonItem' "$ROOT/src/index.tsx"
 ! grep -q '<button' "$ROOT/src/index.tsx"
+! grep -q 'onChangeEnd' "$ROOT/src/index.tsx"
 
-echo "Verification passed: safe child control and controller-focus frontend are present."
+grep -q '_reload_settings' "$ROOT/forza_haptics/backend.py"
+grep -q 'list_presets' "$ROOT/main.py"
+grep -q 'test_effect' "$ROOT/main.py"
+grep -q 'controller_battery_percent' "$ROOT/forza_haptics/status.py"
+grep -q 'COMMAND_PATH' "$ROOT/main.py"
+
+echo "Verification passed: v0.4 features and safe child control are present."

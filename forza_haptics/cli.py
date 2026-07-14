@@ -68,6 +68,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Forza DualSense SteamOS backend")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--status", type=Path, default=DEFAULT_STATUS)
+    parser.add_argument("--command-file", type=Path, default=DEFAULT_DATA_DIR / "command.json")
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="Run the telemetry-to-trigger backend")
@@ -105,7 +106,7 @@ def main() -> int:
     if args.command == "controller-test":
         return controller_test(settings)
     if args.command == "run":
-        return Backend(settings, args.status).run()
+        return Backend(settings, args.config, args.status, args.command_file).run()
 
     return 2
 

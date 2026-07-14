@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import signal
@@ -7,23 +8,114 @@ import threading
 import time
 
 from .config import Settings
+from .diagnostics import read_dualsense_battery
 from .effects import EffectEngine
 from .hidraw import DualSenseWriter
 from .status import RuntimeStatus
 from .telemetry import TelemetryReceiver
-from .triggers import clear_effect
+from .triggers import clear_effect, resistance, vibration
 
 
 class Backend:
-    def __init__(self, settings: Settings, status_path: Path) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        settings_path: Path,
+        status_path: Path,
+        command_path: Path,
+    ) -> None:
         self.settings = settings
+        self.settings_path = settings_path
         self.status_path = status_path
+        self.command_path = command_path
         self.stop_event = threading.Event()
         self.status = RuntimeStatus(enabled=settings.enabled)
         self.log = logging.getLogger("forza-haptics")
+        self._settings_mtime_ns = self._mtime_ns(settings_path)
+        self._last_command_id = ""
+        self._test_name = ""
+        self._test_until = 0.0
+        self._settings_revision = 0
+
+    @staticmethod
+    def _mtime_ns(path: Path) -> int:
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return 0
 
     def request_stop(self, *_: object) -> None:
         self.stop_event.set()
+
+    def _reload_settings(self, engine: EffectEngine, controller: DualSenseWriter) -> None:
+        mtime = self._mtime_ns(self.settings_path)
+        if not mtime or mtime == self._settings_mtime_ns:
+            return
+
+        try:
+            updated = Settings.load(self.settings_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            self.log.warning("Ignoring invalid live settings update: %s", exc)
+            self._settings_mtime_ns = mtime
+            return
+
+        if (updated.udp_host, updated.udp_port) != (
+            self.settings.udp_host,
+            self.settings.udp_port,
+        ):
+            self.log.warning(
+                "UDP host/port changed; restart engine to apply network changes"
+            )
+
+        self.settings = updated
+        engine.settings = updated
+        controller.reconnect_interval = updated.reconnect_interval
+        controller.locked_serial = updated.controller_serial.replace(":", "").lower()
+        self.status.enabled = updated.enabled
+        self._settings_revision += 1
+        self._settings_mtime_ns = mtime
+        self.log.info("Applied live settings revision %d", self._settings_revision)
+
+    def _read_command(self) -> dict | None:
+        try:
+            data = json.loads(self.command_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        command_id = str(data.get("id", ""))
+        if not command_id or command_id == self._last_command_id:
+            return None
+        self._last_command_id = command_id
+        return data
+
+    def _process_command(self) -> None:
+        command = self._read_command()
+        if not command:
+            return
+        if command.get("type") != "test_effect":
+            self.log.warning("Unknown command: %s", command.get("type"))
+            return
+        effect = str(command.get("effect", ""))
+        if effect not in {"pedal", "abs", "gear", "rev"}:
+            self.log.warning("Unknown test effect: %s", effect)
+            return
+        self._test_name = effect
+        self._test_until = time.monotonic() + 1.2
+        self.log.info("Starting test effect: %s", effect)
+
+    def _test_effects(self, now: float):
+        if not self._test_name or now >= self._test_until:
+            self._test_name = ""
+            return None
+        neutral = clear_effect()
+        if self._test_name == "pedal":
+            return resistance(0, 90), resistance(0, 90)
+        if self._test_name == "abs":
+            return vibration(35, 42, 22), neutral
+        if self._test_name == "gear":
+            return neutral, vibration(20, 90, 14)
+        if self._test_name == "rev":
+            return neutral, vibration(25, 60, 32)
+        return None
 
     def _refresh_status(
         self,
@@ -47,18 +139,29 @@ class Backend:
         self.status.packet_count = receiver.packet_count
         self.status.bad_packet_count = receiver.bad_packet_count
         self.status.packet_age_seconds = round(age, 3) if age is not None else None
+        self.status.settings_revision = self._settings_revision
+        self.status.active_test = self._test_name
+
+        battery, battery_status = read_dualsense_battery()
+        self.status.controller_battery_percent = battery
+        self.status.controller_battery_status = battery_status
 
         if controller.connected and controller.info is not None:
+            info = controller.info
             self.status.controller = "connected"
-            self.status.controller_name = controller.info.name
-            self.status.controller_transport = controller.info.transport
-            self.status.controller_path = controller.info.path
+            self.status.controller_name = info.name
+            self.status.controller_transport = info.transport
+            self.status.controller_path = info.path
+            self.status.controller_serial = info.serial
+            self.status.controller_product_id = f"0x{info.product_id:04x}"
             self.status.controller_error = ""
         else:
             self.status.controller = "disconnected"
             self.status.controller_name = ""
             self.status.controller_transport = ""
             self.status.controller_path = ""
+            self.status.controller_serial = ""
+            self.status.controller_product_id = ""
             self.status.controller_error = controller.last_error
 
         self.status.brake_effect = engine.status.brake_mode
@@ -98,10 +201,22 @@ class Backend:
             ) as controller:
                 while not self.stop_event.is_set():
                     controller.connect_if_needed()
+                    self._reload_settings(engine, controller)
+                    self._process_command()
                     state = receiver.receive_latest()
                     now = time.monotonic()
 
-                    if state is not None:
+                    test_effects = self._test_effects(now)
+                    if test_effects is not None:
+                        left, right = test_effects
+                        controller.write(left, right)
+                        engine.status.brake_mode = (
+                            f"test {self._test_name}" if self._test_name in {"pedal", "abs"} else "clear"
+                        )
+                        engine.status.throttle_mode = (
+                            f"test {self._test_name}" if self._test_name in {"pedal", "gear", "rev"} else "clear"
+                        )
+                    elif state is not None:
                         latest_state = state
                         left, right = engine.compute(state)
                         controller.write(left, right)
@@ -133,6 +248,7 @@ class Backend:
             self.status.running = False
             self.status.brake_effect = "clear"
             self.status.throttle_effect = "clear"
+            self.status.active_test = ""
             self.status.write(self.status_path)
             self.log.info("Backend stopped and trigger effects cleared")
 

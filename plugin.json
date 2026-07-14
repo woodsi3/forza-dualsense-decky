@@ -13,6 +13,6 @@
       "haptics",
       "controller"
     ],
-    "description": "Forza telemetry-driven DualSense adaptive triggers for SteamOS."
+    "description": "Forza telemetry-driven DualSense adaptive triggers with live tuning, presets, diagnostics and test effects."
   }
 }

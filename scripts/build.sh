@@ -4,7 +4,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 "$ROOT/scripts/verify.sh"
-pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+if [[ -f pnpm-lock.yaml ]]; then
+  pnpm install --frozen-lockfile
+else
+  pnpm install --no-frozen-lockfile
+fi
 pnpm run build
 
 test -s dist/index.js

@@ -1,6 +1,6 @@
 {
   "name": "forza-dualsense-haptics-decky",
-  "version": "0.2.0",
+  "version": "0.4.0-alpha",
   "description": "Decky frontend for Forza DualSense adaptive trigger haptics",
   "type": "module",
   "scripts": {
