@@ -15,6 +15,7 @@ class RuntimeStatus:
     packet_count: int = 0
     bad_packet_count: int = 0
     packet_age_seconds: float | None = None
+    packet_rate_hz: float = 0.0
     controller: str = "disconnected"
     controller_name: str = ""
     controller_transport: str = ""
@@ -33,6 +34,14 @@ class RuntimeStatus:
     rpm: float = 0.0
     rpm_ratio: float = 0.0
     gear: int = 0
+    abs_active: bool = False
+    traction_state: str = "stable"
+    rear_slip: float = 0.0
+    surface_state: str = "unknown"
+    car_ordinal: int = 0
+    car_class: int = 0
+    car_performance_index: int = 0
+    active_profile: str = "Global"
     updated_unix: float = 0.0
 
     def write(self, path: Path) -> None:
