@@ -21,6 +21,12 @@ class EffectEngine:
         self.settings = settings
         self.status = EffectStatus()
 
+        # Smoothed traction contribution applied to R2.
+        # This prevents noisy wheel-slip telemetry from making the trigger
+        # chatter or pulse.
+        self._traction_extra_force = 0.0
+        self._traction_update_time = time.monotonic()
+
     @staticmethod
     def _scale(value: float, intensity: float) -> int:
         return max(0, min(255, int(round(value * intensity))))
@@ -90,16 +96,39 @@ class EffectEngine:
 
         traction_state, severity = self._traction(state)
         self.status.traction_state = traction_state
-        if severity > 0:
-            extra = self._scale(self.settings.traction_max_extra_force * severity, self.settings.traction_intensity)
-            throttle_effect = resistance(0, min(255, throttle_force + extra))
+
+        # Traction feedback continuously modifies pedal resistance.
+        # It never becomes a vibration effect; gear kick and rev limiter
+        # remain the only event-style R2 pulses.
+        target_extra = float(
+            self._scale(
+                self.settings.traction_max_extra_force * severity,
+                self.settings.traction_intensity,
+            )
+        )
+
+        update_time = time.monotonic()
+        elapsed = max(0.0, min(0.25, update_time - self._traction_update_time))
+        self._traction_update_time = update_time
+
+        # Rise reasonably quickly when slip begins, then release more gently
+        # as traction returns. The exponential form remains consistent if
+        # the telemetry packet rate changes.
+        time_constant = 0.10 if target_extra > self._traction_extra_force else 0.22
+        smoothing = 1.0 - pow(2.718281828, -elapsed / time_constant)
+
+        self._traction_extra_force += (
+            target_extra - self._traction_extra_force
+        ) * smoothing
+
+        smoothed_extra = int(round(self._traction_extra_force))
+
+        if smoothed_extra > 0:
+            throttle_effect = resistance(
+                0,
+                min(255, throttle_force + smoothed_extra),
+            )
             self.status.throttle_mode = f"traction {traction_state}"
-            if traction_state == "heavy slip":
-                throttle_effect = vibration(
-                    25,
-                    self._scale(self.settings.traction_pulse_amplitude, self.settings.traction_intensity),
-                    self.settings.traction_pulse_frequency,
-                )
 
         # Event effects override dynamic pedal/traction feedback briefly.
         if now < self.status.gear_kick_until:
