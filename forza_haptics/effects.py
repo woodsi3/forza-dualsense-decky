@@ -53,12 +53,36 @@ class EffectEngine:
         ):
             return "stable", 0.0
         slip = state.rear_slip
-        if slip < self.settings.traction_mild_slip:
+
+        # Begin building resistance before the formal mild-slip threshold.
+        # This gives the driver an early warning while traction is beginning
+        # to deteriorate, rather than waiting until wheelspin is established.
+        onset_slip = self.settings.traction_mild_slip * 0.45
+
+        if slip < onset_slip:
             return "stable", 0.0
-        span = self.settings.traction_heavy_slip - self.settings.traction_mild_slip
-        severity = (slip - self.settings.traction_mild_slip) / max(span, 0.001)
-        severity = self._curve(severity, self.settings.traction_response_curve)
-        return ("heavy slip" if slip >= self.settings.traction_heavy_slip else "mild slip"), min(1.0, severity)
+
+        span = self.settings.traction_heavy_slip - onset_slip
+        severity = (slip - onset_slip) / max(span, 0.001)
+        severity = max(0.0, min(1.0, severity))
+
+        # Traction feedback must be perceptible early. The normal response
+        # curves are retained, but an early-force bias prevents progressive
+        # mode from becoming almost invisible near the onset point.
+        curved = self._curve(
+            severity,
+            self.settings.traction_response_curve,
+        )
+        severity = max(curved, severity ** 0.60)
+
+        if slip >= self.settings.traction_heavy_slip:
+            traction_state = "heavy slip"
+        elif slip >= self.settings.traction_mild_slip:
+            traction_state = "mild slip"
+        else:
+            traction_state = "approaching limit"
+
+        return traction_state, min(1.0, severity)
 
     def compute(self, state: VehicleState) -> tuple[TriggerEffect, TriggerEffect]:
         now = time.monotonic()
@@ -114,7 +138,7 @@ class EffectEngine:
         # Rise reasonably quickly when slip begins, then release more gently
         # as traction returns. The exponential form remains consistent if
         # the telemetry packet rate changes.
-        time_constant = 0.10 if target_extra > self._traction_extra_force else 0.22
+        time_constant = 0.045 if target_extra > self._traction_extra_force else 0.22
         smoothing = 1.0 - pow(2.718281828, -elapsed / time_constant)
 
         self._traction_extra_force += (
