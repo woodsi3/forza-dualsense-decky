@@ -69,28 +69,9 @@ This branch adds four user-facing improvements:
 
 ## Safe branch workflow
 
-From the existing tested repository:
-
-```bash
-git switch develop
-git switch -c feature/v0.4.0
-```
-
-Copy this source update into the repository, then run:
-
-```bash
-./scripts/verify.sh
-./scripts/build.sh
-git add .
-git commit -m "Add v0.4 live settings presets diagnostics and haptic tests"
-```
-
-Deploy only from Desktop Mode:
-
-```bash
-./scripts/deploy.sh
-sudo reboot
-```
+- From the existing tested repository 
+- Copy this source update into the repository, then verify, build and commit.
+- Deploy only from Desktop Mode
 
 Do not restart `plugin_loader` while Game Mode is active.
 
