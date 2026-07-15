@@ -140,29 +140,72 @@ class EffectEngine:
             self.status.last_gear = state.gear
             return clear_effect(), clear_effect()
 
-        brake_force = self._pedal_force(state.brake, self.settings.brake_base_force, self.settings.brake_max_force)
-        throttle_force = self._pedal_force(state.throttle, self.settings.throttle_base_force, self.settings.throttle_max_force)
-        brake_effect = resistance(0, brake_force)
-        throttle_effect = resistance(0, throttle_force)
-        self.status.brake_mode = "pedal resistance"
-        self.status.throttle_mode = "pedal resistance"
+        if self.settings.pedal_enabled:
+            brake_force = self._pedal_force(
+                state.brake,
+                self.settings.brake_base_force,
+                self.settings.brake_max_force,
+            )
+            throttle_force = self._pedal_force(
+                state.throttle,
+                self.settings.throttle_base_force,
+                self.settings.throttle_max_force,
+            )
+            brake_effect = resistance(0, brake_force)
+            throttle_effect = resistance(0, throttle_force)
+            self.status.brake_mode = "pedal resistance"
+            self.status.throttle_mode = "pedal resistance"
+        else:
+            brake_force = 0
+            throttle_force = 0
+            brake_effect = clear_effect()
+            throttle_effect = clear_effect()
+            self.status.brake_mode = "clear"
+            self.status.throttle_mode = "clear"
 
         abs_active = (
             state.brake >= self.settings.abs_min_brake
             and state.speed_kmh >= self.settings.abs_min_speed_kmh
             and state.front_slip >= self.settings.abs_slip_threshold
         )
-        if abs_active:
-            brake_effect = vibration(35, self._scale(self.settings.abs_amplitude, self.settings.abs_intensity), self.settings.abs_frequency)
+        if self.settings.abs_enabled and abs_active:
+            brake_effect = vibration(
+                35,
+                self._scale(
+                    self.settings.abs_amplitude,
+                    self.settings.abs_intensity,
+                ),
+                self.settings.abs_frequency,
+            )
             self.status.brake_mode = "ABS vibration"
 
-        if self.status.last_gear not in (0, 10) and state.gear not in (0, 10) and state.gear != self.status.last_gear:
-            self.status.gear_kick_until = now + self.settings.gear_kick_duration_ms / 1000.0
+        if not self.settings.gear_kick_enabled:
+            self.status.gear_kick_until = 0.0
+        elif (
+            self.status.last_gear not in (0, 10)
+            and state.gear not in (0, 10)
+            and state.gear != self.status.last_gear
+        ):
+            self.status.gear_kick_until = (
+                now
+                + self.settings.gear_kick_duration_ms / 1000.0
+            )
 
-        if self.status.rev_limiter_active:
-            if state.rpm_ratio < self.settings.rev_limiter_release_ratio or state.throttle <= self.settings.rev_limiter_min_throttle:
+        if not self.settings.rev_limiter_enabled:
+            self.status.rev_limiter_active = False
+        elif self.status.rev_limiter_active:
+            if (
+                state.rpm_ratio
+                < self.settings.rev_limiter_release_ratio
+                or state.throttle
+                <= self.settings.rev_limiter_min_throttle
+            ):
                 self.status.rev_limiter_active = False
-        elif state.rpm_ratio >= self.settings.rev_limiter_ratio and state.throttle > self.settings.rev_limiter_min_throttle:
+        elif (
+            state.rpm_ratio >= self.settings.rev_limiter_ratio
+            and state.throttle
+            > self.settings.rev_limiter_min_throttle
+        ):
             self.status.rev_limiter_active = True
 
         traction_state, severity = self._traction(state)

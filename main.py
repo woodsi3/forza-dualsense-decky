@@ -29,6 +29,10 @@ ENGINE_LOG_PATH = LOG_DIR / "forza-dualsense-engine.log"
 EXAMPLE_SETTINGS = PLUGIN_DIR / "settings.example.json"
 ALLOWED_CONTROLS = {
     "enabled",
+    "pedal_enabled",
+    "abs_enabled",
+    "gear_kick_enabled",
+    "rev_limiter_enabled",
     "pedal_force_intensity",
     "abs_intensity",
     "gear_kick_intensity",
@@ -42,6 +46,10 @@ ALLOWED_CONTROLS = {
     "automatic_car_profiles",
 }
 PRESET_KEYS = [
+    "pedal_enabled",
+    "abs_enabled",
+    "gear_kick_enabled",
+    "rev_limiter_enabled",
     "pedal_force_intensity",
     "abs_intensity",
     "gear_kick_intensity",
@@ -357,7 +365,15 @@ class Plugin:
             raise ValueError(f"Unsupported setting: {key}")
         async with self.settings_lock:
             settings = await self.get_settings()
-            if key in {"enabled", "traction_enabled", "automatic_car_profiles"}:
+            if key in {
+                "enabled",
+                "pedal_enabled",
+                "abs_enabled",
+                "gear_kick_enabled",
+                "rev_limiter_enabled",
+                "traction_enabled",
+                "automatic_car_profiles",
+            }:
                 settings[key] = bool(value)
             elif key in {"pedal_response_curve", "traction_response_curve"}:
                 if value not in {"linear", "progressive", "aggressive"}:
@@ -433,6 +449,65 @@ class Plugin:
         presets[candidate] = dict(presets[name])
         self._atomic_write(PRESETS_PATH, presets)
         return candidate
+
+    async def rename_profile(
+        self,
+        request: dict[str, Any],
+    ) -> str:
+        if not isinstance(request, dict):
+            raise TypeError("Profile rename must be an object")
+
+        old_name = str(request.get("old_name", "")).strip()
+        new_name = str(request.get("new_name", "")).strip()
+
+        if not old_name:
+            raise ValueError("Current profile name is required")
+        if not new_name:
+            raise ValueError("New profile name is required")
+        if len(new_name) > 48:
+            raise ValueError("Profile name must be 48 characters or fewer")
+        if old_name == new_name:
+            return old_name
+
+        presets = json.loads(
+            PRESETS_PATH.read_text(encoding="utf-8")
+        )
+
+        if old_name not in presets:
+            raise ValueError("Profile not found")
+        if new_name in presets:
+            raise ValueError("A profile with that name already exists")
+
+        renamed: dict[str, Any] = {}
+        for name, values in presets.items():
+            renamed[new_name if name == old_name else name] = values
+
+        self._atomic_write(PRESETS_PATH, renamed)
+
+        assignments = await self.get_car_profiles()
+        assignments_changed = False
+
+        for car_id, profile_name in assignments.items():
+            if profile_name == old_name:
+                assignments[car_id] = new_name
+                assignments_changed = True
+
+        if assignments_changed:
+            self._atomic_write(
+                CAR_PROFILES_PATH,
+                assignments,
+            )
+
+        if self.active_profile == old_name:
+            self.active_profile = new_name
+
+        decky.logger.info(
+            "Renamed profile %s to %s",
+            old_name,
+            new_name,
+        )
+
+        return new_name
 
     async def delete_preset(self, name: str) -> bool:
         presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))

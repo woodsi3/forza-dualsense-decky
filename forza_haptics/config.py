@@ -13,6 +13,12 @@ class Settings:
     udp_timeout: float = 0.25
 
     enabled: bool = True
+
+    pedal_enabled: bool = True
+    abs_enabled: bool = True
+    gear_kick_enabled: bool = True
+    rev_limiter_enabled: bool = True
+
     reconnect_interval: float = 2.0
     telemetry_stale_after: float = 1.0
     status_interval: float = 1.0

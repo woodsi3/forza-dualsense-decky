@@ -40,5 +40,9 @@
   "traction_max_extra_force": 90,
   "traction_pulse_amplitude": 48,
   "traction_pulse_frequency": 26,
-  "automatic_car_profiles": false
+  "automatic_car_profiles": false,
+  "pedal_enabled": true,
+  "abs_enabled": true,
+  "gear_kick_enabled": true,
+  "rev_limiter_enabled": true
 }
