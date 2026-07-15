@@ -13,6 +13,12 @@ class Settings:
     udp_timeout: float = 0.25
 
     enabled: bool = True
+
+    pedal_enabled: bool = True
+    abs_enabled: bool = True
+    gear_kick_enabled: bool = True
+    rev_limiter_enabled: bool = True
+
     reconnect_interval: float = 2.0
     telemetry_stale_after: float = 1.0
     status_interval: float = 1.0
@@ -21,6 +27,21 @@ class Settings:
     abs_intensity: float = 1.0
     gear_kick_intensity: float = 1.0
     rev_limiter_intensity: float = 1.0
+    traction_intensity: float = 1.0
+
+    pedal_response_curve: str = "progressive"
+    traction_response_curve: str = "progressive"
+
+    traction_enabled: bool = False
+    traction_min_throttle: int = 40
+    traction_min_speed_kmh: float = 8.0
+    traction_mild_slip: float = 0.22
+    traction_heavy_slip: float = 0.55
+    traction_max_extra_force: int = 90
+    traction_pulse_amplitude: int = 48
+    traction_pulse_frequency: int = 26
+
+    automatic_car_profiles: bool = False
 
     brake_base_force: int = 26
     brake_max_force: int = 150
@@ -77,10 +98,16 @@ class Settings:
             "abs_intensity",
             "gear_kick_intensity",
             "rev_limiter_intensity",
+            "traction_intensity",
         ):
             value = float(getattr(self, name))
             if not 0.0 <= value <= 2.0:
                 raise ValueError(f"{name} must be between 0.0 and 2.0")
+        for name in ("pedal_response_curve", "traction_response_curve"):
+            if getattr(self, name) not in {"linear", "progressive", "aggressive"}:
+                raise ValueError(f"{name} must be linear, progressive or aggressive")
+        if self.traction_mild_slip < 0 or self.traction_heavy_slip <= self.traction_mild_slip:
+            raise ValueError("traction slip thresholds are invalid")
         if not 0.5 <= self.rev_limiter_ratio <= 1.2:
             raise ValueError("rev_limiter_ratio must be between 0.5 and 1.2")
         if not 0.5 <= self.rev_limiter_release_ratio <= self.rev_limiter_ratio:
