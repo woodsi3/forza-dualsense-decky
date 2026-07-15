@@ -2,6 +2,53 @@
 
 SteamOS Decky plugin that maps Forza Horizon 6 telemetry to DualSense adaptive triggers.
 
+### Highlights
+
+* Native SteamOS backend
+* Decky Loader integration
+* Adaptive throttle and brake resistance
+* Dynamic traction guidance
+* Early grip-loss feedback based on slip, throttle demand and slip trend
+* ABS vibration
+* Gear-shift kick
+* Rev-limiter feedback
+* Surface-state telemetry
+* Live effect controls
+* Expandable advanced tuning
+* Saved and renameable profiles
+* Automatic per-car profile selection
+* Safe Global profile fallback
+* Controller diagnostics
+* Built-in haptic tests
+* Automatic settings and profile migration
+
+### Dynamic traction guidance
+
+Traction guidance uses smooth adaptive-trigger resistance rather than vibration.
+
+As available grip decreases, accelerator resistance increases progressively. This gives the driver an early, physical indication that the tyres are approaching their limit and encourages finer throttle modulation.
+
+### Project status
+
+The core feature set is now considered complete.
+
+Future releases will focus on:
+
+* Bug fixes
+* Hardware and SteamOS compatibility
+* Feedback from public testing
+* Telemetry refinements
+* Documentation improvements
+
+### Notes
+
+Forza UDP data-out must be enabled and configured to send telemetry to the SteamOS device running the plugin.
+IP: 127.0.0.1
+Port: 5300
+
+Decky plug in is submitted but not yet approved for download via the decky store. Please see the Release notes for manual installation instructions.
+
+
 ## Safety rules
 
 - Never restart `plugin_loader` while Game Mode/Gamescope is active.
@@ -58,15 +105,6 @@ Decky settings are stored separately from the repository under:
 
 For local Forza Data Out, use `127.0.0.1` and UDP port `5300`.
 
-# v0.4.0-alpha development update
-
-This branch adds four user-facing improvements:
-
-1. **Live settings:** effect sliders and the enable toggle update the running engine without restarting it.
-2. **Preset management:** cycle through presets, load one, save current values as a new numbered preset, duplicate, or delete.
-3. **Controller diagnostics:** transport, battery where exposed by `hid-playstation`, product ID, serial and hidraw path.
-4. **Test haptics:** controller-focusable buttons for pedal resistance, ABS, gear kick and rev limiter.
-
 ## Safe branch workflow
 
 - From the existing tested repository 
@@ -75,14 +113,6 @@ This branch adds four user-facing improvements:
 
 Do not restart `plugin_loader` while Game Mode is active.
 
-## Expected v0.4 behaviour
-
-- Moving a slider updates the UI immediately and writes the setting after a 400 ms debounce.
-- The backend detects settings-file changes within approximately 250 ms.
-- Slider changes no longer stop or restart the engine.
-- Test effects are processed by the already-running engine; the Decky process does not open a second HID handle.
-- Changing UDP host or port still requires **Restart engine**, because the listening socket must be rebound.
-
 ## Preset naming
 
 The alpha UI avoids an on-screen keyboard dependency. New presets are named automatically as `Preset 1`, `Preset 2`, and so on. Duplicates use `Copy`, `Copy 2`, etc. Custom renaming can be added after the core preset workflow is validated.
@@ -90,6 +120,3 @@ The alpha UI avoids an on-screen keyboard dependency. New presets are named auto
 ## Battery and firmware diagnostics
 
 Battery information appears only when SteamOS exposes a matching `sony_controller_battery_*` power-supply entry. Firmware is displayed as unavailable because the direct hidraw path used by this alpha does not expose a reliable firmware version.
-
-## v0.5.0 alpha notes
-Surface state is inferred from Forza puddle, rumble-strip and surface-rumble values. Per-car automatic loading is opt-in and falls back to global settings. Only fixed curves are supported; custom curves are intentionally not planned.
