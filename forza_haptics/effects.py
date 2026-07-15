@@ -27,6 +27,11 @@ class EffectEngine:
         self._traction_extra_force = 0.0
         self._traction_update_time = time.monotonic()
 
+        # State used by traction guidance. Slip trend helps the trigger react
+        # while grip is deteriorating, before full wheelspin is established.
+        self._previous_rear_slip = 0.0
+        self._previous_slip_time = time.monotonic()
+
     @staticmethod
     def _scale(value: float, intensity: float) -> int:
         return max(0, min(255, int(round(value * intensity))))
@@ -46,43 +51,85 @@ class EffectEngine:
         return self._scale(raw, self.settings.pedal_force_intensity)
 
     def _traction(self, state: VehicleState) -> tuple[str, float]:
+        now = time.monotonic()
+        slip = state.rear_slip
+
+        elapsed = max(
+            0.001,
+            min(0.25, now - self._previous_slip_time),
+        )
+        slip_rate = (slip - self._previous_rear_slip) / elapsed
+
+        self._previous_rear_slip = slip
+        self._previous_slip_time = now
+
         if (
             not self.settings.traction_enabled
             or state.throttle < self.settings.traction_min_throttle
             or state.speed_kmh < self.settings.traction_min_speed_kmh
         ):
             return "stable", 0.0
-        slip = state.rear_slip
 
-        # Begin building resistance before the formal mild-slip threshold.
-        # This gives the driver an early warning while traction is beginning
-        # to deteriorate, rather than waiting until wheelspin is established.
-        onset_slip = self.settings.traction_mild_slip * 0.45
+        throttle_span = max(
+            1,
+            255 - self.settings.traction_min_throttle,
+        )
+        throttle_demand = (
+            state.throttle - self.settings.traction_min_throttle
+        ) / throttle_span
+        throttle_demand = max(0.0, min(1.0, throttle_demand))
 
-        if slip < onset_slip:
-            return "stable", 0.0
+        # Start guidance well before established wheelspin. This represents
+        # the tyres approaching their available grip rather than merely
+        # reporting traction loss after it has happened.
+        onset_slip = self.settings.traction_mild_slip * 0.30
 
-        span = self.settings.traction_heavy_slip - onset_slip
-        severity = (slip - onset_slip) / max(span, 0.001)
-        severity = max(0.0, min(1.0, severity))
+        slip_span = self.settings.traction_heavy_slip - onset_slip
+        grip_usage = (slip - onset_slip) / max(slip_span, 0.001)
+        grip_usage = max(0.0, min(1.0, grip_usage))
 
-        # Traction feedback must be perceptible early. The normal response
-        # curves are retained, but an early-force bias prevents progressive
-        # mode from becoming almost invisible near the onset point.
-        curved = self._curve(
-            severity,
+        # Positive slip rate means grip is deteriorating. Negative slip rate
+        # never adds force, allowing the trigger to relax during recovery.
+        rising_slip = max(0.0, slip_rate)
+        trend = min(1.0, rising_slip / 1.25)
+
+        curved_usage = self._curve(
+            grip_usage,
             self.settings.traction_response_curve,
         )
-        severity = max(curved, severity ** 0.60)
+
+        # Preserve the selected response curve, but ensure the early part of
+        # the guidance remains perceptible.
+        early_usage = grip_usage ** 0.55
+        grip_component = max(curved_usage, early_usage)
+
+        # Slip trend is most meaningful when the driver is demanding power.
+        trend_component = trend * throttle_demand
+
+        # Absolute grip usage remains dominant. The trend component advances
+        # the force slightly when wheelspin is developing rapidly.
+        severity = (
+            grip_component * 0.78
+            + trend_component * 0.22
+        )
+
+        # Do not generate guidance solely from telemetry noise at very low
+        # grip usage. A meaningful slip level or trend must exist.
+        if grip_usage < 0.015 and trend_component < 0.08:
+            severity = 0.0
+
+        severity = max(0.0, min(1.0, severity))
 
         if slip >= self.settings.traction_heavy_slip:
             traction_state = "heavy slip"
         elif slip >= self.settings.traction_mild_slip:
             traction_state = "mild slip"
-        else:
+        elif severity > 0.0:
             traction_state = "approaching limit"
+        else:
+            traction_state = "stable"
 
-        return traction_state, min(1.0, severity)
+        return traction_state, severity
 
     def compute(self, state: VehicleState) -> tuple[TriggerEffect, TriggerEffect]:
         now = time.monotonic()
@@ -138,12 +185,32 @@ class EffectEngine:
         # Rise reasonably quickly when slip begins, then release more gently
         # as traction returns. The exponential form remains consistent if
         # the telemetry packet rate changes.
-        time_constant = 0.045 if target_extra > self._traction_extra_force else 0.22
-        smoothing = 1.0 - pow(2.718281828, -elapsed / time_constant)
+        time_constant = (
+            0.055
+            if target_extra > self._traction_extra_force
+            else 0.18
+        )
+        smoothing = 1.0 - pow(
+            2.718281828,
+            -elapsed / time_constant,
+        )
 
-        self._traction_extra_force += (
+        desired_change = (
             target_extra - self._traction_extra_force
         ) * smoothing
+
+        # Limit how quickly resistance may change between telemetry frames.
+        # This is the main protection against smooth modulation becoming a
+        # vibration-like sensation.
+        maximum_rise = 240.0 * elapsed
+        maximum_fall = 180.0 * elapsed
+
+        if desired_change > 0.0:
+            desired_change = min(desired_change, maximum_rise)
+        else:
+            desired_change = max(desired_change, -maximum_fall)
+
+        self._traction_extra_force += desired_change
 
         smoothed_extra = int(round(self._traction_extra_force))
 
