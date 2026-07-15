@@ -81,7 +81,7 @@ Improved backend stability with:
 * Safer backend lifecycle management
 * Improved process handling
 * Better startup behaviour
-* Improved deployment workflow, utilising the scripted safetey checks (like not restarting PluginLoader_ while in gamescope. Learnt the hard way and un-black screening my Steam Machine after not even a week of ownership was fun...)
+* Improved deployment workflow, utilising the scripted safetey checks (like not restarting Plugin_Loader while in gamescope. Learnt the hard way and un-black screening my Steam Machine after not even a week of ownership was fun...)
 
 ---
 
