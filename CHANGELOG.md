@@ -4,8 +4,6 @@ All notable changes to this project will be documented in this file. Commits are
 
 ---
 
-# Forza DualSense Haptics
-
 ## Changes from v0.5.0-alpha to v1.0.0
 
 This release marks the completion of the core feature set and the project's first stable release. Development during this period focused on refining the driving experience, improving usability, increasing reliability, and preparing the project for public release.
@@ -159,7 +157,7 @@ Future releases will focus on:
 * Bug fixes
 * Incremental enhancements
 
----------------------------------------------------
+---
 
 ## v0.5.0-alpha
 - Added surface-state and traction-state decoding.
