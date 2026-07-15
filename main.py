@@ -21,6 +21,8 @@ LOG_DIR = Path(
 
 SETTINGS_PATH = SETTINGS_DIR / "forza-dualsense-settings.json"
 PRESETS_PATH = SETTINGS_DIR / "forza-dualsense-presets.json"
+CAR_PROFILES_PATH = SETTINGS_DIR / "forza-dualsense-car-profiles.json"
+GLOBAL_PROFILE_PATH = SETTINGS_DIR / "forza-dualsense-global-profile.json"
 STATUS_PATH = RUNTIME_DIR / "forza-dualsense-status.json"
 COMMAND_PATH = RUNTIME_DIR / "forza-dualsense-command.json"
 ENGINE_LOG_PATH = LOG_DIR / "forza-dualsense-engine.log"
@@ -31,33 +33,114 @@ ALLOWED_CONTROLS = {
     "abs_intensity",
     "gear_kick_intensity",
     "rev_limiter_intensity",
+    "traction_intensity",
+    "pedal_response_curve",
+    "traction_response_curve",
+    "traction_enabled",
+    "traction_mild_slip",
+    "traction_heavy_slip",
+    "automatic_car_profiles",
 }
 PRESET_KEYS = [
     "pedal_force_intensity",
     "abs_intensity",
     "gear_kick_intensity",
     "rev_limiter_intensity",
+    "traction_intensity",
+    "pedal_response_curve",
+    "traction_response_curve",
+    "traction_enabled",
+    "traction_mild_slip",
+    "traction_heavy_slip",
 ]
 
 
 class Plugin:
     process: asyncio.subprocess.Process | None = None
     process_lock: asyncio.Lock
+    settings_lock: asyncio.Lock
     startup_task: asyncio.Task | None = None
     backend_error: str = ""
+    last_auto_car: int = 0
+    active_profile: str = "Global"
 
     async def _ensure_settings(self) -> None:
         SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not SETTINGS_PATH.exists():
-            SETTINGS_PATH.write_text(EXAMPLE_SETTINGS.read_text(encoding="utf-8"), encoding="utf-8")
-        if not PRESETS_PATH.exists():
-            defaults = {
-                "Balanced": {key: 1.0 for key in PRESET_KEYS},
-                "Subtle": {key: 0.65 for key in PRESET_KEYS},
-                "Strong": {key: 1.35 for key in PRESET_KEYS},
+
+        defaults = json.loads(EXAMPLE_SETTINGS.read_text(encoding="utf-8"))
+
+        # Migrate existing settings by adding newly introduced keys while
+        # preserving every existing user value.
+        if SETTINGS_PATH.exists():
+            existing = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            migrated = {**defaults, **existing}
+            if migrated != existing:
+                self._atomic_write(SETTINGS_PATH, migrated)
+                decky.logger.info("Migrated settings schema with new defaults")
+        else:
+            self._atomic_write(SETTINGS_PATH, defaults)
+
+        preset_defaults = {
+            key: defaults[key]
+            for key in PRESET_KEYS
+        }
+
+        if PRESETS_PATH.exists():
+            presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+            migrated_presets = {}
+
+            for name, preset in presets.items():
+                migrated_preset = dict(preset_defaults)
+                if isinstance(preset, dict):
+                    migrated_preset.update(
+                        {
+                            key: value
+                            for key, value in preset.items()
+                            if key in PRESET_KEYS
+                        }
+                    )
+                migrated_presets[name] = migrated_preset
+
+            if migrated_presets != presets:
+                self._atomic_write(PRESETS_PATH, migrated_presets)
+                decky.logger.info("Migrated presets schema with new defaults")
+        else:
+            intensity_keys = {
+                "pedal_force_intensity",
+                "abs_intensity",
+                "gear_kick_intensity",
+                "rev_limiter_intensity",
+                "traction_intensity",
             }
-            self._atomic_write(PRESETS_PATH, defaults)
+
+            presets = {}
+            for name, scale in (
+                ("Balanced", 1.0),
+                ("Subtle", 0.65),
+                ("Strong", 1.35),
+            ):
+                preset = dict(preset_defaults)
+                for key in intensity_keys:
+                    preset[key] = scale
+                presets[name] = preset
+
+            self._atomic_write(PRESETS_PATH, presets)
+
+        if not CAR_PROFILES_PATH.exists():
+            self._atomic_write(CAR_PROFILES_PATH, {})
+
+        if not GLOBAL_PROFILE_PATH.exists():
+            current = json.loads(
+                SETTINGS_PATH.read_text(encoding="utf-8")
+            )
+            self._atomic_write(
+                GLOBAL_PROFILE_PATH,
+                {
+                    key: current[key]
+                    for key in PRESET_KEYS
+                },
+            )
 
     @staticmethod
     def _atomic_write(path: Path, data: Any) -> None:
@@ -134,6 +217,94 @@ class Plugin:
         await self._stop_backend()
         return await self._start_backend()
 
+    async def _apply_profile_values(
+        self,
+        name: str,
+        values: dict[str, Any],
+    ) -> None:
+        settings = await self.get_settings()
+
+        for key in PRESET_KEYS:
+            if key in values:
+                settings[key] = values[key]
+
+        self._atomic_write(SETTINGS_PATH, settings)
+        self.active_profile = name
+
+        decky.logger.info(
+            "Applied profile %s",
+            name,
+        )
+
+    async def _restore_global_profile(self) -> None:
+        global_profile = json.loads(
+            GLOBAL_PROFILE_PATH.read_text(encoding="utf-8")
+        )
+        await self._apply_profile_values(
+            "Global",
+            global_profile,
+        )
+
+    async def _apply_automatic_car_profile(
+        self,
+        status: dict[str, Any],
+    ) -> None:
+        settings = await self.get_settings()
+        car_ordinal = int(
+            status.get("car_ordinal", 0) or 0
+        )
+        automatic = bool(
+            settings.get("automatic_car_profiles", False)
+        )
+
+        if not automatic:
+            if self.active_profile != "Global":
+                await self._restore_global_profile()
+
+            self.last_auto_car = car_ordinal
+            return
+
+        if car_ordinal <= 0:
+            return
+
+        if car_ordinal == self.last_auto_car:
+            return
+
+        self.last_auto_car = car_ordinal
+
+        profiles = await self.get_car_profiles()
+        profile_name = profiles.get(str(car_ordinal))
+
+        if not profile_name:
+            if self.active_profile != "Global":
+                await self._restore_global_profile()
+            return
+
+        profiles_data = json.loads(
+            PRESETS_PATH.read_text(encoding="utf-8")
+        )
+        profile = profiles_data.get(profile_name)
+
+        if not isinstance(profile, dict):
+            decky.logger.warning(
+                "Assigned profile %s for car %s does not exist",
+                profile_name,
+                car_ordinal,
+            )
+            await self._restore_global_profile()
+            return
+
+        await self._apply_profile_values(
+            profile_name,
+            profile,
+        )
+
+        decky.logger.info(
+            "Auto-loaded profile %s for car %s",
+            profile_name,
+            car_ordinal,
+        )
+
     async def get_status(self) -> dict[str, Any]:
         running = self.process is not None and self.process.returncode is None
         default: dict[str, Any] = {
@@ -166,25 +337,63 @@ class Plugin:
             decky.logger.warning("Could not read status: %s", exc)
         default["running"] = running
         default["backend_error"] = self.backend_error
+        try:
+            await self._apply_automatic_car_profile(default)
+        except Exception as exc:
+            decky.logger.warning("Automatic car-profile selection failed: %s", exc)
+        default["active_profile"] = self.active_profile
         return default
 
     async def get_settings(self) -> dict[str, Any]:
         await self._ensure_settings()
         return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
 
-    async def update_setting(self, key: str, value: Any) -> dict[str, Any]:
-        if key not in ALLOWED_CONTROLS:
+    async def update_setting(self, update: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(update, dict):
+            raise TypeError("Settings update must be an object")
+        key = update.get("key")
+        value = update.get("value")
+        if not isinstance(key, str) or key not in ALLOWED_CONTROLS:
             raise ValueError(f"Unsupported setting: {key}")
-        settings = await self.get_settings()
-        if key == "enabled":
-            settings[key] = bool(value)
-        else:
-            numeric = float(value)
-            if not 0.0 <= numeric <= 2.0:
-                raise ValueError(f"{key} must be between 0.0 and 2.0")
-            settings[key] = numeric
-        self._atomic_write(SETTINGS_PATH, settings)
-        return settings
+        async with self.settings_lock:
+            settings = await self.get_settings()
+            if key in {"enabled", "traction_enabled", "automatic_car_profiles"}:
+                settings[key] = bool(value)
+            elif key in {"pedal_response_curve", "traction_response_curve"}:
+                if value not in {"linear", "progressive", "aggressive"}:
+                    raise ValueError("Unsupported response curve")
+                settings[key] = value
+            else:
+                numeric = float(value)
+                if key.endswith("_intensity") and not 0.0 <= numeric <= 2.0:
+                    raise ValueError(f"{key} must be between 0.0 and 2.0")
+                settings[key] = numeric
+            self._atomic_write(SETTINGS_PATH, settings)
+
+            # Settings changed while using Global become the new global
+            # fallback. Changes made while an assigned profile is active do
+            # not silently overwrite that saved profile.
+            if (
+                key in PRESET_KEYS
+                and self.active_profile == "Global"
+            ):
+                global_profile = json.loads(
+                    GLOBAL_PROFILE_PATH.read_text(
+                        encoding="utf-8"
+                    )
+                )
+                global_profile[key] = settings[key]
+                self._atomic_write(
+                    GLOBAL_PROFILE_PATH,
+                    global_profile,
+                )
+
+            decky.logger.info(
+                "Persisted setting %s=%s",
+                key,
+                settings[key],
+            )
+            return settings
 
     async def list_presets(self) -> list[str]:
         await self._ensure_settings()
@@ -233,6 +442,29 @@ class Plugin:
         self._atomic_write(PRESETS_PATH, presets)
         return True
 
+    async def get_car_profiles(self) -> dict[str, str]:
+        await self._ensure_settings()
+        return json.loads(CAR_PROFILES_PATH.read_text(encoding="utf-8"))
+
+    async def assign_current_car_profile(self, request: dict[str, Any]) -> bool:
+        car_ordinal = str(request.get("car_ordinal", "0"))
+        preset = str(request.get("preset", ""))
+        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+        if not car_ordinal or car_ordinal == "0":
+            raise ValueError("No current car detected")
+        if preset not in presets:
+            raise ValueError("Preset not found")
+        profiles = await self.get_car_profiles()
+        profiles[car_ordinal] = preset
+        self._atomic_write(CAR_PROFILES_PATH, profiles)
+        return True
+
+    async def remove_current_car_profile(self, car_ordinal: int) -> bool:
+        profiles = await self.get_car_profiles()
+        profiles.pop(str(car_ordinal), None)
+        self._atomic_write(CAR_PROFILES_PATH, profiles)
+        return True
+
     async def test_effect(self, effect: str) -> bool:
         if effect not in {"pedal", "abs", "gear", "rev"}:
             raise ValueError(f"Unsupported test effect: {effect}")
@@ -245,9 +477,10 @@ class Plugin:
     async def _main(self):
         self.loop = asyncio.get_event_loop()
         self.process_lock = asyncio.Lock()
+        self.settings_lock = asyncio.Lock()
         await self._ensure_settings()
         self.startup_task = self.loop.create_task(self._startup_backend())
-        decky.logger.info("Forza DualSense Haptics v0.4.0 loaded")
+        decky.logger.info("Forza DualSense Haptics v0.5.0 loaded")
 
     async def _unload(self):
         if self.startup_task is not None and not self.startup_task.done():

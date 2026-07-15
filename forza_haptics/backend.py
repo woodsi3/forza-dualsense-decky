@@ -139,6 +139,7 @@ class Backend:
         self.status.packet_count = receiver.packet_count
         self.status.bad_packet_count = receiver.bad_packet_count
         self.status.packet_age_seconds = round(age, 3) if age is not None else None
+        self.status.packet_rate_hz = round(receiver.packet_rate_hz, 1)
         self.status.settings_revision = self._settings_revision
         self.status.active_test = self._test_name
 
@@ -172,6 +173,13 @@ class Backend:
             self.status.rpm = round(latest_state.engine_rpm, 0)
             self.status.rpm_ratio = round(latest_state.rpm_ratio, 3)
             self.status.gear = latest_state.gear
+            self.status.abs_active = engine.status.brake_mode == "ABS vibration"
+            self.status.traction_state = engine.status.traction_state
+            self.status.rear_slip = round(latest_state.rear_slip, 3)
+            self.status.surface_state = latest_state.surface_state
+            self.status.car_ordinal = latest_state.car_ordinal
+            self.status.car_class = latest_state.car_class
+            self.status.car_performance_index = latest_state.car_performance_index
 
         self.status.write(self.status_path)
 

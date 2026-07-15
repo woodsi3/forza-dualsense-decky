@@ -1,5 +1,5 @@
 {
-  "udp_host": "0.0.0.0",
+  "udp_host": "127.0.0.1",
   "udp_port": 5300,
   "udp_timeout": 0.25,
   "enabled": true,
@@ -28,5 +28,17 @@
   "controller_serial": "",
   "debug": false,
   "rev_limiter_release_ratio": 0.84,
-  "rev_limiter_min_throttle": 20
+  "rev_limiter_min_throttle": 20,
+  "traction_intensity": 1.0,
+  "pedal_response_curve": "progressive",
+  "traction_response_curve": "progressive",
+  "traction_enabled": false,
+  "traction_min_throttle": 40,
+  "traction_min_speed_kmh": 8.0,
+  "traction_mild_slip": 0.22,
+  "traction_heavy_slip": 0.55,
+  "traction_max_extra_force": 90,
+  "traction_pulse_amplitude": 48,
+  "traction_pulse_frequency": 26,
+  "automatic_car_profiles": false
 }
