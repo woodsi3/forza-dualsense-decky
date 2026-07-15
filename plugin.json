@@ -14,5 +14,6 @@
       "controller"
     ],
     "description": "Forza telemetry-driven DualSense adaptive triggers with live traction feedback."
-  }
+  },
+  "version": "1.0.0"
 }
