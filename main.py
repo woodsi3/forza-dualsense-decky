@@ -480,7 +480,7 @@ class Plugin:
         self.settings_lock = asyncio.Lock()
         await self._ensure_settings()
         self.startup_task = self.loop.create_task(self._startup_backend())
-        decky.logger.info("Forza DualSense Haptics v0.5.0 loaded")
+        decky.logger.info("Forza DualSense Haptics v0.5.5 loaded")
 
     async def _unload(self):
         if self.startup_task is not None and not self.startup_task.done():
