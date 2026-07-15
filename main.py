@@ -22,6 +22,7 @@ LOG_DIR = Path(
 SETTINGS_PATH = SETTINGS_DIR / "forza-dualsense-settings.json"
 PRESETS_PATH = SETTINGS_DIR / "forza-dualsense-presets.json"
 CAR_PROFILES_PATH = SETTINGS_DIR / "forza-dualsense-car-profiles.json"
+GLOBAL_PROFILE_PATH = SETTINGS_DIR / "forza-dualsense-global-profile.json"
 STATUS_PATH = RUNTIME_DIR / "forza-dualsense-status.json"
 COMMAND_PATH = RUNTIME_DIR / "forza-dualsense-command.json"
 ENGINE_LOG_PATH = LOG_DIR / "forza-dualsense-engine.log"
@@ -129,6 +130,18 @@ class Plugin:
         if not CAR_PROFILES_PATH.exists():
             self._atomic_write(CAR_PROFILES_PATH, {})
 
+        if not GLOBAL_PROFILE_PATH.exists():
+            current = json.loads(
+                SETTINGS_PATH.read_text(encoding="utf-8")
+            )
+            self._atomic_write(
+                GLOBAL_PROFILE_PATH,
+                {
+                    key: current[key]
+                    for key in PRESET_KEYS
+                },
+            )
+
     @staticmethod
     def _atomic_write(path: Path, data: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -204,30 +217,93 @@ class Plugin:
         await self._stop_backend()
         return await self._start_backend()
 
-    async def _apply_automatic_car_profile(self, status: dict[str, Any]) -> None:
+    async def _apply_profile_values(
+        self,
+        name: str,
+        values: dict[str, Any],
+    ) -> None:
         settings = await self.get_settings()
-        car_ordinal = int(status.get("car_ordinal", 0) or 0)
-        if not settings.get("automatic_car_profiles", False) or car_ordinal <= 0:
-            self.active_profile = "Global"
+
+        for key in PRESET_KEYS:
+            if key in values:
+                settings[key] = values[key]
+
+        self._atomic_write(SETTINGS_PATH, settings)
+        self.active_profile = name
+
+        decky.logger.info(
+            "Applied profile %s",
+            name,
+        )
+
+    async def _restore_global_profile(self) -> None:
+        global_profile = json.loads(
+            GLOBAL_PROFILE_PATH.read_text(encoding="utf-8")
+        )
+        await self._apply_profile_values(
+            "Global",
+            global_profile,
+        )
+
+    async def _apply_automatic_car_profile(
+        self,
+        status: dict[str, Any],
+    ) -> None:
+        settings = await self.get_settings()
+        car_ordinal = int(
+            status.get("car_ordinal", 0) or 0
+        )
+        automatic = bool(
+            settings.get("automatic_car_profiles", False)
+        )
+
+        if not automatic:
+            if self.active_profile != "Global":
+                await self._restore_global_profile()
+
             self.last_auto_car = car_ordinal
             return
+
+        if car_ordinal <= 0:
+            return
+
         if car_ordinal == self.last_auto_car:
             return
+
         self.last_auto_car = car_ordinal
+
         profiles = await self.get_car_profiles()
-        preset_name = profiles.get(str(car_ordinal))
-        if not preset_name:
-            self.active_profile = "Global"
+        profile_name = profiles.get(str(car_ordinal))
+
+        if not profile_name:
+            if self.active_profile != "Global":
+                await self._restore_global_profile()
             return
-        presets = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
-        preset = presets.get(preset_name)
-        if not isinstance(preset, dict):
-            self.active_profile = "Global"
+
+        profiles_data = json.loads(
+            PRESETS_PATH.read_text(encoding="utf-8")
+        )
+        profile = profiles_data.get(profile_name)
+
+        if not isinstance(profile, dict):
+            decky.logger.warning(
+                "Assigned profile %s for car %s does not exist",
+                profile_name,
+                car_ordinal,
+            )
+            await self._restore_global_profile()
             return
-        settings.update(preset)
-        self._atomic_write(SETTINGS_PATH, settings)
-        self.active_profile = preset_name
-        decky.logger.info("Auto-loaded preset %s for car %s", preset_name, car_ordinal)
+
+        await self._apply_profile_values(
+            profile_name,
+            profile,
+        )
+
+        decky.logger.info(
+            "Auto-loaded profile %s for car %s",
+            profile_name,
+            car_ordinal,
+        )
 
     async def get_status(self) -> dict[str, Any]:
         running = self.process is not None and self.process.returncode is None
@@ -293,7 +369,30 @@ class Plugin:
                     raise ValueError(f"{key} must be between 0.0 and 2.0")
                 settings[key] = numeric
             self._atomic_write(SETTINGS_PATH, settings)
-            decky.logger.info("Persisted setting %s=%s", key, settings[key])
+
+            # Settings changed while using Global become the new global
+            # fallback. Changes made while an assigned profile is active do
+            # not silently overwrite that saved profile.
+            if (
+                key in PRESET_KEYS
+                and self.active_profile == "Global"
+            ):
+                global_profile = json.loads(
+                    GLOBAL_PROFILE_PATH.read_text(
+                        encoding="utf-8"
+                    )
+                )
+                global_profile[key] = settings[key]
+                self._atomic_write(
+                    GLOBAL_PROFILE_PATH,
+                    global_profile,
+                )
+
+            decky.logger.info(
+                "Persisted setting %s=%s",
+                key,
+                settings[key],
+            )
             return settings
 
     async def list_presets(self) -> list[str]:
