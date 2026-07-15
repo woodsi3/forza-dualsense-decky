@@ -1,4 +1,4 @@
-import { ButtonItem, PanelSection, PanelSectionRow, SliderField, ToggleField, staticClasses } from "@decky/ui";
+import { ButtonItem, PanelSection, PanelSectionRow, SliderField, TextField, ToggleField, staticClasses } from "@decky/ui";
 import { callable, definePlugin } from "@decky/api";
 import { useCallback, useEffect, useState } from "react";
 import { FaGamepad } from "react-icons/fa";
@@ -12,7 +12,7 @@ type RuntimeStatus = {
   surface_state:string; car_ordinal:number; car_class:number; car_performance_index:number; active_profile:string; backend_error?:string;
 };
 type Curve = "linear"|"progressive"|"aggressive";
-type Settings = { enabled:boolean; pedal_force_intensity:number; abs_intensity:number; gear_kick_intensity:number; rev_limiter_intensity:number; traction_intensity:number; pedal_response_curve:Curve; traction_response_curve:Curve; traction_enabled:boolean; traction_mild_slip:number; traction_heavy_slip:number; automatic_car_profiles:boolean; };
+type Settings = { enabled:boolean; pedal_enabled:boolean; abs_enabled:boolean; gear_kick_enabled:boolean; rev_limiter_enabled:boolean; pedal_force_intensity:number; abs_intensity:number; gear_kick_intensity:number; rev_limiter_intensity:number; traction_intensity:number; pedal_response_curve:Curve; traction_response_curve:Curve; traction_enabled:boolean; traction_mild_slip:number; traction_heavy_slip:number; automatic_car_profiles:boolean; };
 type SettingUpdate={key:keyof Settings;value:boolean|number|string};
 
 const getStatus=callable<[],RuntimeStatus>("get_status");
@@ -24,6 +24,7 @@ const createPreset=callable<[],string>("create_preset");
 const loadPreset=callable<[name:string],Settings>("load_preset");
 const duplicatePreset=callable<[name:string],string>("duplicate_preset");
 const deletePreset=callable<[name:string],boolean>("delete_preset");
+const renameProfile=callable<[request:{old_name:string;new_name:string}],string>("rename_profile");
 const testEffect=callable<[effect:string],boolean>("test_effect");
 const assignCarProfile=callable<[request:{car_ordinal:number;preset:string}],boolean>("assign_current_car_profile");
 const removeCarProfile=callable<[car_ordinal:number],boolean>("remove_current_car_profile");
@@ -34,7 +35,7 @@ const emptyStatus:RuntimeStatus={running:false,enabled:true,telemetry:"waiting",
 
 function StatusRow({label,value}:{label:string;value:string}){return <PanelSectionRow><div style={{display:"flex",width:"100%",justifyContent:"space-between"}}><span>{label}</span><span style={{fontWeight:600}}>{value}</span></div></PanelSectionRow>}
 function Content(){
- const[status,setStatus]=useState(emptyStatus); const[settings,setSettings]=useState<Settings|null>(null); const[presets,setPresets]=useState<string[]>([]); const[presetIndex,setPresetIndex]=useState(0); const[busy,setBusy]=useState(false); const[error,setError]=useState(""); const[advanced,setAdvanced]=useState("");
+ const[status,setStatus]=useState(emptyStatus); const[settings,setSettings]=useState<Settings|null>(null); const[presets,setPresets]=useState<string[]>([]); const[presetIndex,setPresetIndex]=useState(0); const[busy,setBusy]=useState(false); const[error,setError]=useState(""); const[advanced,setAdvanced]=useState(""); const[profileName,setProfileName]=useState("");
  const refresh=useCallback(async()=>{try{setStatus(await getStatus())}catch(e){setError(String(e))}},[]);
  const refreshPresets=useCallback(async()=>{const names=await listPresets();setPresets(names);setPresetIndex(i=>names.length?Math.min(i,names.length-1):0)},[]);
  useEffect(()=>{getSettings().then(setSettings).catch(e=>setError(String(e)));void refreshPresets();void refresh();const timer=window.setInterval(refresh,750);return()=>window.clearInterval(timer)},[refresh,refreshPresets]);
@@ -50,19 +51,43 @@ function Content(){
   </PanelSection>
   <PanelSection title="Live controls">
    <PanelSectionRow><ToggleField label="Enable haptics" checked={settings.enabled} onChange={v=>void save("enabled",v)}/></PanelSectionRow>
-   {slider("Pedal resistance","pedal_force_intensity",settings.pedal_force_intensity)}
+
+   <PanelSectionRow><ToggleField label="Pedal resistance" checked={settings.pedal_enabled} onChange={v=>void save("pedal_enabled",v)}/></PanelSectionRow>
    <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="pedal"?"":"pedal")}>Pedal advanced</ButtonItem></PanelSectionRow>
-   {advanced==="pedal"&&<PanelSectionRow><ButtonItem layout="below" onClick={()=>void save("pedal_response_curve",nextCurve(settings.pedal_response_curve))}>Response curve: {settings.pedal_response_curve}</ButtonItem></PanelSectionRow>}
-   {slider("ABS vibration","abs_intensity",settings.abs_intensity)}
-   {slider("Gear kick","gear_kick_intensity",settings.gear_kick_intensity)}
-   {slider("Rev limiter","rev_limiter_intensity",settings.rev_limiter_intensity)}
-   {slider("Traction feedback","traction_intensity",settings.traction_intensity)}
+   {advanced==="pedal"&&<>
+    {slider("Pedal response","pedal_force_intensity",settings.pedal_force_intensity)}
+    <PanelSectionRow><ButtonItem layout="below" onClick={()=>void save("pedal_response_curve",nextCurve(settings.pedal_response_curve))}>Response curve: {settings.pedal_response_curve}</ButtonItem></PanelSectionRow>
+   </>}
+
+   <PanelSectionRow><ToggleField label="ABS vibration" checked={settings.abs_enabled} onChange={v=>void save("abs_enabled",v)}/></PanelSectionRow>
+   <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="abs"?"":"abs")}>ABS advanced</ButtonItem></PanelSectionRow>
+   {advanced==="abs"&&<>
+    {slider("ABS vibration","abs_intensity",settings.abs_intensity)}
+   </>}
+
+   <PanelSectionRow><ToggleField label="Gear kick" checked={settings.gear_kick_enabled} onChange={v=>void save("gear_kick_enabled",v)}/></PanelSectionRow>
+   <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="gear"?"":"gear")}>Gear kick advanced</ButtonItem></PanelSectionRow>
+   {advanced==="gear"&&<>
+    {slider("Gear kick","gear_kick_intensity",settings.gear_kick_intensity)}
+   </>}
+
+   <PanelSectionRow><ToggleField label="Rev limiter" checked={settings.rev_limiter_enabled} onChange={v=>void save("rev_limiter_enabled",v)}/></PanelSectionRow>
+   <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="rev"?"":"rev")}>Rev limiter advanced</ButtonItem></PanelSectionRow>
+   {advanced==="rev"&&<>
+    {slider("Rev limiter vibration","rev_limiter_intensity",settings.rev_limiter_intensity)}
+   </>}
+
    <PanelSectionRow><ToggleField label="Dynamic traction feedback" checked={settings.traction_enabled} onChange={v=>void save("traction_enabled",v)}/></PanelSectionRow>
-   <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="traction"?"":"traction")}>Traction advanced</ButtonItem></PanelSectionRow>
-   {advanced==="traction"&&<><PanelSectionRow><ButtonItem layout="below" onClick={()=>void save("traction_response_curve",nextCurve(settings.traction_response_curve))}>Response curve: {settings.traction_response_curve}</ButtonItem></PanelSectionRow><PanelSectionRow><SliderField label="Mild slip threshold" value={settings.traction_mild_slip} min={0.05} max={0.8} step={0.05} showValue onChange={v=>{setSettings({...settings,traction_mild_slip:v});void save("traction_mild_slip",v)}}/></PanelSectionRow><PanelSectionRow><SliderField label="Heavy slip threshold" value={settings.traction_heavy_slip} min={0.15} max={1.5} step={0.05} showValue onChange={v=>{setSettings({...settings,traction_heavy_slip:v});void save("traction_heavy_slip",v)}}/></PanelSectionRow></>}
+   <PanelSectionRow><ButtonItem layout="below" onClick={()=>setAdvanced(advanced==="traction"?"":"traction")}>Traction feedback advanced</ButtonItem></PanelSectionRow>
+   {advanced==="traction"&&<>
+    {slider("Traction feedback","traction_intensity",settings.traction_intensity)}
+    <PanelSectionRow><ButtonItem layout="below" onClick={()=>void save("traction_response_curve",nextCurve(settings.traction_response_curve))}>Response curve: {settings.traction_response_curve}</ButtonItem></PanelSectionRow>
+   </>}
   </PanelSection>
   <PanelSection title="Profiles and cars">
-   <PanelSectionRow><ButtonItem layout="below" onClick={()=>presets.length&&setPresetIndex((presetIndex+1)%presets.length)}>Selected profile: {selectedPreset}</ButtonItem></PanelSectionRow>
+   <PanelSectionRow><ButtonItem layout="below" onClick={()=>{if(presets.length){const next=(presetIndex+1)%presets.length;setPresetIndex(next);setProfileName(presets[next]??"")}}}>Selected profile: {selectedPreset}</ButtonItem></PanelSectionRow>
+   <PanelSectionRow><TextField label="Profile name" value={profileName} onChange={e=>setProfileName(e.target.value)}/></PanelSectionRow>
+   <PanelSectionRow><ButtonItem layout="below" disabled={!presets.length||!profileName.trim()||busy} onClick={async()=>{setBusy(true);try{const renamed=await renameProfile({old_name:selectedPreset,new_name:profileName.trim()});await refreshPresets();const names=await listPresets();setPresetIndex(Math.max(0,names.indexOf(renamed)));setProfileName(renamed);setError("")}catch(e){setError(`Could not rename profile: ${String(e)}`)}finally{setBusy(false)}}}>Rename selected profile</ButtonItem></PanelSectionRow>
    <PanelSectionRow><ButtonItem layout="below" disabled={!presets.length||busy} onClick={async()=>{setBusy(true);try{setSettings(await loadPreset(selectedPreset))}finally{setBusy(false)}}}>Load selected profile</ButtonItem></PanelSectionRow>
    <PanelSectionRow><ButtonItem layout="below" disabled={busy} onClick={async()=>{setBusy(true);try{const name=await createPreset();await refreshPresets();const names=await listPresets();setPresetIndex(Math.max(0,names.indexOf(name)))}finally{setBusy(false)}}}>Save current as new profile</ButtonItem></PanelSectionRow>
    <PanelSectionRow><ButtonItem layout="below" disabled={!presets.length||busy} onClick={async()=>{setBusy(true);try{const name=await duplicatePreset(selectedPreset);await refreshPresets();const names=await listPresets();setPresetIndex(Math.max(0,names.indexOf(name)))}finally{setBusy(false)}}}>Duplicate selected profile</ButtonItem></PanelSectionRow>
